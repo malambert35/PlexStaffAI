@@ -69,30 +69,54 @@ async def moderate_requests():
         
         for req in reqs:
             req_id = req.get('id')
-            title = req['media'].get('title', 'N/A')
             
-            # IA Decision avec raison
+            # EXTRACTION TITRE ROBUSTE (plusieurs chemins possibles)
+            media = req.get('media', {})
+            title = (
+                media.get('title') or 
+                media.get('name') or 
+                media.get('originalTitle') or 
+                media.get('originalName') or 
+                f"TMDB-{media.get('tmdbId', '?')}"
+            )
+            
+            # Contexte additionnel pour IA
+            media_type = req.get('type', 'unknown')  # movie/tv
+            requested_by = req.get('requestedBy', {}).get('displayName', 'Unknown')
+            year = media.get('releaseDate', '')[:4] if media.get('releaseDate') else ''
+            
+            # LOG DEBUG (vérif extraction)
+            print(f"[DEBUG] Request #{req_id}: title='{title}', type={media_type}, year={year}, user={requested_by}")
+            
+            # IA Decision avec CONTEXTE enrichi
             if client:
                 try:
+                    prompt = f"""Plex Overseerr request analysis:
+- Title: {title}
+- Type: {media_type}
+- Year: {year or 'unknown'}
+- Requested by: {requested_by}
+
+Should staff APPROVE or REJECT? 
+Rules: Approve legitimate movies/shows. Reject spam, duplicates, inappropriate content.
+Answer: APPROVE or REJECT with brief reason (max 40 words)."""
+                    
                     completion = client.chat.completions.create(
                         model="gpt-4o-mini",
-                        max_tokens=50,
-                        temperature=0.1,
-                        messages=[{
-                            "role": "user",
-                            "content": f"Plex request: '{title}'. Should staff APPROVE or REJECT? Answer APPROVE or REJECT with brief reason."
-                        }]
+                        max_tokens=60,
+                        temperature=0.2,
+                        messages=[{"role": "user", "content": prompt}]
                     )
                     decision = completion.choices[0].message.content.strip()
                 except Exception as e:
                     decision = f"APPROVE - IA error: {str(e)[:30]}"
             else:
-                decision = "APPROVE - No OpenAI key configured"
+                decision = "APPROVE - No OpenAI key (default approve all)"
             
             action = "APPROVED" if "APPROVE" in decision.upper() else "REJECTED"
-            reason = decision[:100]
+            reason = decision[:120]
             
-            # VRAIE API OVERSEERR (approve/decline)
+            # API OVERSEERR (approve/decline)
             try:
                 if action == "APPROVED":
                     patch_resp = requests.post(
@@ -100,24 +124,25 @@ async def moderate_requests():
                         headers=headers,
                         timeout=10
                     )
-                    api_status = "✅ Approved in Overseerr" if patch_resp.status_code == 200 else f"⚠️ API error {patch_resp.status_code}"
+                    api_status = "✅ Approved" if patch_resp.status_code == 200 else f"⚠️ Error {patch_resp.status_code}"
                 else:
                     patch_resp = requests.post(
                         f"{OVERSEERR_URL}/request/{req_id}/decline",
                         headers=headers,
                         timeout=10
                     )
-                    api_status = "❌ Declined in Overseerr" if patch_resp.status_code == 200 else f"⚠️ API error {patch_resp.status_code}"
+                    api_status = "❌ Declined" if patch_resp.status_code == 200 else f"⚠️ Error {patch_resp.status_code}"
             except Exception as e:
-                api_status = f"⚠️ API call failed: {str(e)[:50]}"
+                api_status = f"⚠️ API failed: {str(e)[:40]}"
             
             # Save DB
+            full_context = f"{title} ({media_type} {year}) by {requested_by}"
             conn.execute("INSERT INTO decisions (request_id, decision, reason, timestamp) VALUES (?, ?, ?, ?)",
-                        (req_id, action, f"{reason} | {api_status}", datetime.datetime.now().isoformat()))
+                        (req_id, action, f"{full_context} | {reason} | {api_status}", datetime.datetime.now().isoformat()))
             
             results.append({
                 "id": req_id,
-                "title": title,
+                "title": full_context,
                 "action": action,
                 "reason": reason,
                 "api_status": api_status
