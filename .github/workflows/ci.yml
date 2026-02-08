@@ -9,7 +9,7 @@ on:
 
 env:
   REGISTRY: ghcr.io  # Optionnel GitHub Container
-  DOCKERHUB_REPO: tonpseudo/plexstaffai
+  DOCKERHUB_REPO: malambert35/plexstaffai
 
 jobs:
   build:
