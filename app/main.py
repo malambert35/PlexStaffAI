@@ -61,7 +61,8 @@ async def dashboard():
 async def moderate_requests():
     try:
         client = get_openai_client()
-        resp = requests.get(f"{OVERSEERR_URL}/request?pending=true&take=5", 
+        # Test sans filtre pending d'abord
+        resp = requests.get(f"{OVERSEERR_URL}/request?filter=pending&take=10&sort=added", 
                           headers=headers, timeout=10)
         reqs = resp.json().get('results', [])
         results = []
@@ -141,19 +142,75 @@ async def stats_fragment():
     """.format(total=total, last_run=last_run, pct=pct, recent=recent)
     return html
 
+@app.get("/debug/overseerr")
+async def debug_overseerr():
+    """Debug Overseerr API connection et requests"""
+    try:
+        # Test sans filtre
+        resp_all = requests.get(f"{OVERSEERR_URL}/request?take=10", headers=headers, timeout=10)
+        all_data = resp_all.json()
+        
+        # Test avec filter=pending
+        resp_pending = requests.get(f"{OVERSEERR_URL}/request?filter=pending&take=10", headers=headers, timeout=10)
+        pending_data = resp_pending.json()
+        
+        # Test avec pending=true (old syntax)
+        resp_old = requests.get(f"{OVERSEERR_URL}/request?pending=true&take=10", headers=headers, timeout=10)
+        old_data = resp_old.json()
+        
+        # Status breakdown
+        statuses = {}
+        for req in all_data.get('results', []):
+            status = req.get('status', 'unknown')
+            statuses[status] = statuses.get(status, 0) + 1
+        
+        return {
+            "config": {
+                "overseerr_url": OVERSEERR_URL,
+                "api_key_configured": bool(headers.get("X-Api-Key")),
+                "api_key_length": len(headers.get("X-Api-Key", "")) if headers.get("X-Api-Key") else 0
+            },
+            "results": {
+                "all_requests": all_data.get('pageInfo', {}).get('results', 0),
+                "filter_pending": pending_data.get('pageInfo', {}).get('results', 0),
+                "pending_true": old_data.get('pageInfo', {}).get('results', 0)
+            },
+            "status_breakdown": statuses,
+            "sample_requests": [
+                {
+                    "id": r.get('id'),
+                    "title": r.get('media', {}).get('title'),
+                    "status": r.get('status'),
+                    "type": r.get('type')
+                } for r in all_data.get('results', [])[:3]
+            ]
+        }
+    except Exception as e:
+        return {
+            "error": str(e),
+            "config": {
+                "overseerr_url": OVERSEERR_URL,
+                "api_key_set": bool(headers.get("X-Api-Key"))
+            }
+        }
+
 @app.get("/moderate-html", response_class=HTMLResponse)
 async def moderate_html():
     """HTML fragment pour HTMX modération"""
     result = await moderate_requests()
     
     if result.get("status") == "error":
+        error_msg = result.get('message', 'Erreur inconnue')
         return """
         <div class="bg-red-900/50 p-6 rounded-xl border border-red-700">
             <h3 class="text-xl font-bold text-red-300 mb-2">❌ Erreur Connexion</h3>
             <p class="text-red-200">Impossible de contacter Overseerr</p>
-            <p class="text-sm text-red-400 mt-2">Vérifiez OVERSEERR_API_URL et OVERSEERR_API_KEY</p>
+            <p class="text-sm text-red-400 mt-2">Détails: {error}</p>
+            <a href="/debug/overseerr" target="_blank" class="text-blue-400 underline text-sm mt-2 block">
+                🔍 Voir diagnostic complet
+            </a>
         </div>
-        """
+        """.format(error=error_msg)
     
     results = result.get('results', [])
     count = result.get('count', 0)
@@ -161,8 +218,11 @@ async def moderate_html():
     if count == 0:
         return """
         <div class="bg-yellow-900/50 p-6 rounded-xl border border-yellow-700">
-            <h3 class="text-xl font-bold text-yellow-300 mb-2">⚠️ Aucune Request Pending</h3>
-            <p class="text-yellow-200">Queue Overseerr vide - Tout est traité !</p>
+            <h3 class="text-xl font-bold text-yellow-300 mb-2">⚠️ Aucune Request Trouvée</h3>
+            <p class="text-yellow-200">Queue Overseerr vide avec filtre 'pending'</p>
+            <a href="/debug/overseerr" target="_blank" class="text-blue-400 underline text-sm mt-3 block">
+                🔍 Debug: Voir toutes les requests disponibles
+            </a>
         </div>
         """
     
@@ -189,17 +249,23 @@ async def moderate_html():
     <div class="bg-gray-800/50 backdrop-blur-xl p-8 rounded-3xl border border-gray-700">
         <h3 class="text-2xl font-bold mb-6 flex items-center text-white">
             <span class="w-3 h-3 bg-green-400 rounded-full mr-3 animate-pulse"></span>
-            ✅ Modération IA Terminée ({count} requests traitées)
+            ✅ Modération IA Terminée ({count} requests)
         </h3>
         <div class="space-y-3">
             {items}
         </div>
         <div class="mt-6 p-4 bg-blue-900/30 rounded-lg border border-blue-700">
-            <p class="text-blue-300 text-sm">💡 Les décisions sont enregistrées dans la base SQLite</p>
+            <p class="text-blue-300 text-sm">💡 Décisions enregistrées dans SQLite /config/staffai.db</p>
         </div>
     </div>
     """.format(count=count, items=html_items)
 
 @app.get("/health")
 async def health():
-    return {"status": "healthy", "db": os.path.exists(DB_PATH), "openai": bool(get_openai_client())}
+    return {
+        "status": "healthy",
+        "version": "1.4",
+        "db": os.path.exists(DB_PATH),
+        "openai": bool(get_openai_client()),
+        "overseerr_configured": bool(headers.get("X-Api-Key"))
+    }
