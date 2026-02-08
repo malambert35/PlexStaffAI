@@ -1,13 +1,17 @@
 <div align="center">
 
-# 🚀 PlexStaffAI
+# PlexStaffAI
 
-### Modération Automatique IA pour Overseerr/Plex
+![Version](https://img.shields.io/badge/stable-v1.5.0-blue?style=for-the-badge)
+![Beta](https://img.shields.io/badge/v1.6.0--beta-orange?style=for-the-badge)
+![Docker](https://img.shields.io/docker/pulls/malambert35/plexstaffai?style=for-the-badge)
 
-[![Docker Pulls](https://img.shields.io/docker/pulls/malambert35/plexstaffai?style=for-the-badge&logo=docker&logoColor=white)](https://hub.docker.com/r/malambert35/plexstaffai)
-[![GitHub Stars](https://img.shields.io/github/stars/malambert35/PlexStaffAI?style=for-the-badge&logo=github)](https://github.com/malambert35/PlexStaffAI)
-[![License](https://img.shields.io/github/license/malambert35/PlexStaffAI?style=for-the-badge)](LICENSE)
-[![Docker Image Size](https://img.shields.io/docker/image-size/malambert35/plexstaffai?style=for-the-badge&logo=docker)](https://hub.docker.com/r/malambert35/plexstaffai)
+**🧪 Beta v1.6 Available:** Smart Rules + ML Feedback System → [Release Notes](https://github.com/malambert35/PlexStaffAI/releases/tag/v1.6.0-beta)
+
+---
+
+(... reste du README inchangé ...)
+
 
 **Dashboard Web HTMX • Auto-Scan 15min • Historique Persistant • GPT-4o-mini**
 
