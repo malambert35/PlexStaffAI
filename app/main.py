@@ -141,6 +141,65 @@ async def stats_fragment():
     """.format(total=total, last_run=last_run, pct=pct, recent=recent)
     return html
 
+@app.get("/moderate-html", response_class=HTMLResponse)
+async def moderate_html():
+    """HTML fragment pour HTMX modération"""
+    result = await moderate_requests()
+    
+    if result.get("status") == "error":
+        return """
+        <div class="bg-red-900/50 p-6 rounded-xl border border-red-700">
+            <h3 class="text-xl font-bold text-red-300 mb-2">❌ Erreur Connexion</h3>
+            <p class="text-red-200">Impossible de contacter Overseerr</p>
+            <p class="text-sm text-red-400 mt-2">Vérifiez OVERSEERR_API_URL et OVERSEERR_API_KEY</p>
+        </div>
+        """
+    
+    results = result.get('results', [])
+    count = result.get('count', 0)
+    
+    if count == 0:
+        return """
+        <div class="bg-yellow-900/50 p-6 rounded-xl border border-yellow-700">
+            <h3 class="text-xl font-bold text-yellow-300 mb-2">⚠️ Aucune Request Pending</h3>
+            <p class="text-yellow-200">Queue Overseerr vide - Tout est traité !</p>
+        </div>
+        """
+    
+    # Build HTML list
+    html_items = ""
+    for r in results:
+        action = r.get('action', 'UNKNOWN')
+        title = r.get('title', 'N/A')
+        req_id = r.get('id', '?')
+        color = "green" if action == "APPROVED" else "red"
+        icon = "✅" if action == "APPROVED" else "❌"
+        
+        html_items += """
+        <div class="flex justify-between items-center p-4 bg-gray-700/50 rounded-lg border border-gray-600 hover:bg-gray-700 transition-all duration-200">
+            <div class="flex-1">
+                <span class="font-semibold text-white text-lg">{title}</span>
+                <span class="text-xs text-gray-400 ml-3">ID: {req_id}</span>
+            </div>
+            <div class="text-{color}-400 font-bold text-2xl">{icon} {action}</div>
+        </div>
+        """.format(title=title, req_id=req_id, color=color, icon=icon, action=action)
+    
+    return """
+    <div class="bg-gray-800/50 backdrop-blur-xl p-8 rounded-3xl border border-gray-700">
+        <h3 class="text-2xl font-bold mb-6 flex items-center text-white">
+            <span class="w-3 h-3 bg-green-400 rounded-full mr-3 animate-pulse"></span>
+            ✅ Modération IA Terminée ({count} requests traitées)
+        </h3>
+        <div class="space-y-3">
+            {items}
+        </div>
+        <div class="mt-6 p-4 bg-blue-900/30 rounded-lg border border-blue-700">
+            <p class="text-blue-300 text-sm">💡 Les décisions sont enregistrées dans la base SQLite</p>
+        </div>
+    </div>
+    """.format(count=count, items=html_items)
+
 @app.get("/health")
 async def health():
     return {"status": "healthy", "db": os.path.exists(DB_PATH), "openai": bool(get_openai_client())}
