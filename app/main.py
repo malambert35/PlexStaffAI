@@ -61,7 +61,6 @@ async def dashboard():
 async def moderate_requests():
     try:
         client = get_openai_client()
-        # Test sans filtre pending d'abord
         resp = requests.get(f"{OVERSEERR_URL}/request?filter=pending&take=10&sort=added", 
                           headers=headers, timeout=10)
         reqs = resp.json().get('results', [])
@@ -69,27 +68,60 @@ async def moderate_requests():
         conn = sqlite3.connect(DB_PATH)
         
         for req in reqs:
+            req_id = req.get('id')
             title = req['media'].get('title', 'N/A')
+            
+            # IA Decision avec raison
             if client:
-                completion = client.chat.completions.create(
-                    model="gpt-4o-mini",
-                    max_tokens=20,
-                    temperature=0.1,
-                    messages=[{
-                        "role": "user",
-                        "content": f"Plex request: {title}. APPROVE or REJECT ONLY."
-                    }]
-                )
-                decision = completion.choices[0].message.content.strip().upper()
+                try:
+                    completion = client.chat.completions.create(
+                        model="gpt-4o-mini",
+                        max_tokens=50,
+                        temperature=0.1,
+                        messages=[{
+                            "role": "user",
+                            "content": f"Plex request: '{title}'. Should staff APPROVE or REJECT? Answer APPROVE or REJECT with brief reason."
+                        }]
+                    )
+                    decision = completion.choices[0].message.content.strip()
+                except Exception as e:
+                    decision = f"APPROVE - IA error: {str(e)[:30]}"
             else:
-                decision = "MOCK_APPROVE"
+                decision = "APPROVE - No OpenAI key configured"
             
-            action = "APPROVED" if "APPROVE" in decision else "REJECTED"
-            reason = decision[:50]
+            action = "APPROVED" if "APPROVE" in decision.upper() else "REJECTED"
+            reason = decision[:100]
             
+            # VRAIE API OVERSEERR (approve/decline)
+            try:
+                if action == "APPROVED":
+                    patch_resp = requests.post(
+                        f"{OVERSEERR_URL}/request/{req_id}/approve",
+                        headers=headers,
+                        timeout=10
+                    )
+                    api_status = "✅ Approved in Overseerr" if patch_resp.status_code == 200 else f"⚠️ API error {patch_resp.status_code}"
+                else:
+                    patch_resp = requests.post(
+                        f"{OVERSEERR_URL}/request/{req_id}/decline",
+                        headers=headers,
+                        timeout=10
+                    )
+                    api_status = "❌ Declined in Overseerr" if patch_resp.status_code == 200 else f"⚠️ API error {patch_resp.status_code}"
+            except Exception as e:
+                api_status = f"⚠️ API call failed: {str(e)[:50]}"
+            
+            # Save DB
             conn.execute("INSERT INTO decisions (request_id, decision, reason, timestamp) VALUES (?, ?, ?, ?)",
-                        (req.get('id'), action, reason, datetime.datetime.now().isoformat()))
-            results.append({"id": req.get('id'), "title": title, "action": action})
+                        (req_id, action, f"{reason} | {api_status}", datetime.datetime.now().isoformat()))
+            
+            results.append({
+                "id": req_id,
+                "title": title,
+                "action": action,
+                "reason": reason,
+                "api_status": api_status
+            })
         
         conn.commit()
         conn.close()
@@ -146,19 +178,12 @@ async def stats_fragment():
 async def debug_overseerr():
     """Debug Overseerr API connection et requests"""
     try:
-        # Test sans filtre
         resp_all = requests.get(f"{OVERSEERR_URL}/request?take=10", headers=headers, timeout=10)
         all_data = resp_all.json()
         
-        # Test avec filter=pending
         resp_pending = requests.get(f"{OVERSEERR_URL}/request?filter=pending&take=10", headers=headers, timeout=10)
         pending_data = resp_pending.json()
         
-        # Test avec pending=true (old syntax)
-        resp_old = requests.get(f"{OVERSEERR_URL}/request?pending=true&take=10", headers=headers, timeout=10)
-        old_data = resp_old.json()
-        
-        # Status breakdown
         statuses = {}
         for req in all_data.get('results', []):
             status = req.get('status', 'unknown')
@@ -172,8 +197,7 @@ async def debug_overseerr():
             },
             "results": {
                 "all_requests": all_data.get('pageInfo', {}).get('results', 0),
-                "filter_pending": pending_data.get('pageInfo', {}).get('results', 0),
-                "pending_true": old_data.get('pageInfo', {}).get('results', 0)
+                "filter_pending": pending_data.get('pageInfo', {}).get('results', 0)
             },
             "status_breakdown": statuses,
             "sample_requests": [
@@ -196,7 +220,7 @@ async def debug_overseerr():
 
 @app.get("/moderate-html", response_class=HTMLResponse)
 async def moderate_html():
-    """HTML fragment pour HTMX modération"""
+    """HTML fragment avec raisons IA complètes"""
     result = await moderate_requests()
     
     if result.get("status") == "error":
@@ -218,32 +242,38 @@ async def moderate_html():
     if count == 0:
         return """
         <div class="bg-yellow-900/50 p-6 rounded-xl border border-yellow-700">
-            <h3 class="text-xl font-bold text-yellow-300 mb-2">⚠️ Aucune Request Trouvée</h3>
-            <p class="text-yellow-200">Queue Overseerr vide avec filtre 'pending'</p>
+            <h3 class="text-xl font-bold text-yellow-300 mb-2">⚠️ Queue Vide</h3>
+            <p class="text-yellow-200">Aucune request pending dans Overseerr</p>
             <a href="/debug/overseerr" target="_blank" class="text-blue-400 underline text-sm mt-3 block">
-                🔍 Debug: Voir toutes les requests disponibles
+                🔍 Voir toutes les requests
             </a>
         </div>
         """
     
-    # Build HTML list
+    # HTML avec raisons + API status
     html_items = ""
     for r in results:
         action = r.get('action', 'UNKNOWN')
         title = r.get('title', 'N/A')
         req_id = r.get('id', '?')
+        reason = r.get('reason', 'No reason')
+        api_status = r.get('api_status', '')
         color = "green" if action == "APPROVED" else "red"
         icon = "✅" if action == "APPROVED" else "❌"
         
         html_items += """
-        <div class="flex justify-between items-center p-4 bg-gray-700/50 rounded-lg border border-gray-600 hover:bg-gray-700 transition-all duration-200">
-            <div class="flex-1">
-                <span class="font-semibold text-white text-lg">{title}</span>
-                <span class="text-xs text-gray-400 ml-3">ID: {req_id}</span>
+        <div class="p-4 bg-gray-700/50 rounded-lg border border-gray-600 hover:bg-gray-700 transition-all duration-200">
+            <div class="flex justify-between items-start mb-2">
+                <div class="flex-1">
+                    <span class="font-bold text-white text-lg">{title}</span>
+                    <span class="text-xs text-gray-400 ml-2">#{req_id}</span>
+                </div>
+                <div class="text-{color}-400 font-black text-2xl">{icon} {action}</div>
             </div>
-            <div class="text-{color}-400 font-bold text-2xl">{icon} {action}</div>
+            <div class="text-sm text-gray-300 italic mb-1 bg-gray-800/50 p-2 rounded">💬 {reason}</div>
+            <div class="text-xs text-gray-500 mt-1">{api_status}</div>
         </div>
-        """.format(title=title, req_id=req_id, color=color, icon=icon, action=action)
+        """.format(title=title, req_id=req_id, color=color, icon=icon, action=action, reason=reason, api_status=api_status)
     
     return """
     <div class="bg-gray-800/50 backdrop-blur-xl p-8 rounded-3xl border border-gray-700">
@@ -251,11 +281,9 @@ async def moderate_html():
             <span class="w-3 h-3 bg-green-400 rounded-full mr-3 animate-pulse"></span>
             ✅ Modération IA Terminée ({count} requests)
         </h3>
-        <div class="space-y-3">
-            {items}
-        </div>
+        <div class="space-y-3">{items}</div>
         <div class="mt-6 p-4 bg-blue-900/30 rounded-lg border border-blue-700">
-            <p class="text-blue-300 text-sm">💡 Décisions enregistrées dans SQLite /config/staffai.db</p>
+            <p class="text-blue-300 text-sm">💡 Actions appliquées dans Overseerr + enregistrées en DB locale</p>
         </div>
     </div>
     """.format(count=count, items=html_items)
