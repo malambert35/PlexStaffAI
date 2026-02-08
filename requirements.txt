@@ -1,9 +1,9 @@
 fastapi==0.115.0
 uvicorn[standard]==0.32.0
 requests==2.32.3
-langchain-openai==0.2.2
-langchain-core==0.3.12
-langchain-community==0.3.2
+langchain-openai==0.1.20
+langchain-core==0.2.38
+langchain-community==0.2.38
 openai==1.51.0
 pydantic==2.9.2
 python-crontab==3.1.1
