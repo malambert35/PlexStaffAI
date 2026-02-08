@@ -9,7 +9,7 @@ import json
 from openai import OpenAI
 import httpx
 
-app = FastAPI(title="PlexStaffAI", version="1.4")
+app = FastAPI(title="PlexStaffAI", version="1.5")
 OVERSEERR_URL = os.getenv("OVERSEERR_API_URL", "http://overseerr:5055") + "/api/v1"
 headers = {"X-Api-Key": os.getenv("OVERSEERR_API_KEY")}
 DB_PATH = "/config/staffai.db"
@@ -37,13 +37,12 @@ def init_db():
     try:
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
-        c.execute('DROP TABLE IF EXISTS decisions')
-        c.execute('''CREATE TABLE decisions 
+        c.execute('''CREATE TABLE IF NOT EXISTS decisions 
                      (id INTEGER PRIMARY KEY AUTOINCREMENT,
                       request_id INTEGER, decision TEXT, reason TEXT, timestamp TEXT)''')
         conn.commit()
         conn.close()
-        print("✅ DB v1.4 ready")
+        print("✅ DB v1.5 ready")
     except Exception as e:
         print(f"DB error: {e}")
 
@@ -70,7 +69,7 @@ async def moderate_requests():
         for req in reqs:
             req_id = req.get('id')
             
-            # EXTRACTION TITRE ROBUSTE (plusieurs chemins possibles)
+            # EXTRACTION TITRE ROBUSTE
             media = req.get('media', {})
             title = (
                 media.get('title') or 
@@ -80,15 +79,14 @@ async def moderate_requests():
                 f"TMDB-{media.get('tmdbId', '?')}"
             )
             
-            # Contexte additionnel pour IA
-            media_type = req.get('type', 'unknown')  # movie/tv
+            # Contexte additionnel
+            media_type = req.get('type', 'unknown')
             requested_by = req.get('requestedBy', {}).get('displayName', 'Unknown')
             year = media.get('releaseDate', '')[:4] if media.get('releaseDate') else ''
             
-            # LOG DEBUG (vérif extraction)
-            print(f"[DEBUG] Request #{req_id}: title='{title}', type={media_type}, year={year}, user={requested_by}")
+            print(f"[AUTO-MODERATE] #{req_id}: {title} ({media_type} {year}) by {requested_by}")
             
-            # IA Decision avec CONTEXTE enrichi
+            # IA Decision avec CONTEXTE
             if client:
                 try:
                     prompt = f"""Plex Overseerr request analysis:
@@ -116,7 +114,7 @@ Answer: APPROVE or REJECT with brief reason (max 40 words)."""
             action = "APPROVED" if "APPROVE" in decision.upper() else "REJECTED"
             reason = decision[:120]
             
-            # API OVERSEERR (approve/decline)
+            # API OVERSEERR
             try:
                 if action == "APPROVED":
                     patch_resp = requests.post(
@@ -159,7 +157,7 @@ async def staff_report():
     try:
         conn = sqlite3.connect(DB_PATH)
         total = conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0]
-        approved = conn.execute("SELECT COUNT(*) FROM decisions WHERE decision LIKE '%APPROVED%'").fetchone()[0]
+        approved = conn.execute("SELECT COUNT(*) FROM decisions WHERE decision='APPROVED'").fetchone()[0]
         pct = round((approved/total*100) if total else 0)
         last_time = conn.execute("SELECT timestamp FROM decisions ORDER BY id DESC LIMIT 1").fetchone()
         last_run = last_time[0][:16] if last_time else "--"
@@ -201,7 +199,7 @@ async def stats_fragment():
 
 @app.get("/debug/overseerr")
 async def debug_overseerr():
-    """Debug Overseerr API connection et requests"""
+    """Debug Overseerr API"""
     try:
         resp_all = requests.get(f"{OVERSEERR_URL}/request?take=10", headers=headers, timeout=10)
         all_data = resp_all.json()
@@ -217,8 +215,7 @@ async def debug_overseerr():
         return {
             "config": {
                 "overseerr_url": OVERSEERR_URL,
-                "api_key_configured": bool(headers.get("X-Api-Key")),
-                "api_key_length": len(headers.get("X-Api-Key", "")) if headers.get("X-Api-Key") else 0
+                "api_key_configured": bool(headers.get("X-Api-Key"))
             },
             "results": {
                 "all_requests": all_data.get('pageInfo', {}).get('results', 0),
@@ -229,35 +226,25 @@ async def debug_overseerr():
                 {
                     "id": r.get('id'),
                     "title": r.get('media', {}).get('title'),
-                    "status": r.get('status'),
-                    "type": r.get('type')
+                    "status": r.get('status')
                 } for r in all_data.get('results', [])[:3]
             ]
         }
     except Exception as e:
-        return {
-            "error": str(e),
-            "config": {
-                "overseerr_url": OVERSEERR_URL,
-                "api_key_set": bool(headers.get("X-Api-Key"))
-            }
-        }
+        return {"error": str(e)}
 
 @app.get("/moderate-html", response_class=HTMLResponse)
 async def moderate_html():
-    """HTML fragment avec raisons IA complètes"""
+    """HTML fragment modération"""
     result = await moderate_requests()
     
     if result.get("status") == "error":
         error_msg = result.get('message', 'Erreur inconnue')
         return """
         <div class="bg-red-900/50 p-6 rounded-xl border border-red-700">
-            <h3 class="text-xl font-bold text-red-300 mb-2">❌ Erreur Connexion</h3>
-            <p class="text-red-200">Impossible de contacter Overseerr</p>
-            <p class="text-sm text-red-400 mt-2">Détails: {error}</p>
-            <a href="/debug/overseerr" target="_blank" class="text-blue-400 underline text-sm mt-2 block">
-                🔍 Voir diagnostic complet
-            </a>
+            <h3 class="text-xl font-bold text-red-300 mb-2">❌ Erreur</h3>
+            <p class="text-red-200">{error}</p>
+            <a href="/debug/overseerr" target="_blank" class="text-blue-400 underline text-sm mt-2 block">Debug</a>
         </div>
         """.format(error=error_msg)
     
@@ -268,14 +255,10 @@ async def moderate_html():
         return """
         <div class="bg-yellow-900/50 p-6 rounded-xl border border-yellow-700">
             <h3 class="text-xl font-bold text-yellow-300 mb-2">⚠️ Queue Vide</h3>
-            <p class="text-yellow-200">Aucune request pending dans Overseerr</p>
-            <a href="/debug/overseerr" target="_blank" class="text-blue-400 underline text-sm mt-3 block">
-                🔍 Voir toutes les requests
-            </a>
+            <p class="text-yellow-200">Aucune request pending</p>
         </div>
         """
     
-    # HTML avec raisons + API status
     html_items = ""
     for r in results:
         action = r.get('action', 'UNKNOWN')
@@ -287,7 +270,7 @@ async def moderate_html():
         icon = "✅" if action == "APPROVED" else "❌"
         
         html_items += """
-        <div class="p-4 bg-gray-700/50 rounded-lg border border-gray-600 hover:bg-gray-700 transition-all duration-200">
+        <div class="p-4 bg-gray-700/50 rounded-lg border border-gray-600 hover:bg-gray-700 transition">
             <div class="flex justify-between items-start mb-2">
                 <div class="flex-1">
                     <span class="font-bold text-white text-lg">{title}</span>
@@ -304,20 +287,114 @@ async def moderate_html():
     <div class="bg-gray-800/50 backdrop-blur-xl p-8 rounded-3xl border border-gray-700">
         <h3 class="text-2xl font-bold mb-6 flex items-center text-white">
             <span class="w-3 h-3 bg-green-400 rounded-full mr-3 animate-pulse"></span>
-            ✅ Modération IA Terminée ({count} requests)
+            ✅ Modération IA ({count} requests)
         </h3>
         <div class="space-y-3">{items}</div>
         <div class="mt-6 p-4 bg-blue-900/30 rounded-lg border border-blue-700">
-            <p class="text-blue-300 text-sm">💡 Actions appliquées dans Overseerr + enregistrées en DB locale</p>
+            <p class="text-blue-300 text-sm">💡 Actions appliquées + enregistrées en DB</p>
         </div>
     </div>
     """.format(count=count, items=html_items)
+
+@app.get("/history", response_class=HTMLResponse)
+async def history_page():
+    """Historique complet persistant"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        total = conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0]
+        approved = conn.execute("SELECT COUNT(*) FROM decisions WHERE decision='APPROVED'").fetchone()[0]
+        rejected = total - approved
+        
+        rows = conn.execute("""
+            SELECT id, request_id, decision, reason, timestamp 
+            FROM decisions 
+            ORDER BY id DESC 
+            LIMIT 100
+        """).fetchall()
+        conn.close()
+        
+        html_rows = ""
+        for row in rows:
+            db_id, req_id, decision, reason, timestamp = row
+            color = "text-green-400" if decision == "APPROVED" else "text-red-400"
+            icon = "✅" if decision == "APPROVED" else "❌"
+            time_short = timestamp[:16].replace('T', ' ')
+            
+            html_rows += """
+            <tr class="border-b border-gray-700 hover:bg-gray-800/50 transition">
+                <td class="p-3 text-gray-400 text-sm">#{db_id}</td>
+                <td class="p-3 text-white font-semibold">{req_id}</td>
+                <td class="p-3 {color} font-bold">{icon} {decision}</td>
+                <td class="p-3 text-gray-300 text-sm italic max-w-md truncate">{reason}</td>
+                <td class="p-3 text-gray-500 text-xs">{time}</td>
+            </tr>
+            """.format(db_id=db_id, req_id=req_id, color=color, icon=icon, decision=decision, reason=reason, time=time_short)
+        
+        return """
+        <!DOCTYPE html>
+        <html lang="fr">
+        <head>
+            <meta charset="UTF-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1.0">
+            <title>Historique PlexStaffAI</title>
+            <script src="https://cdn.tailwindcss.com"></script>
+        </head>
+        <body class="bg-gray-900 text-white">
+            <div class="max-w-7xl mx-auto p-8">
+                <div class="flex justify-between items-center mb-8">
+                    <h1 class="text-5xl font-black bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">
+                        📜 Historique Modération
+                    </h1>
+                    <a href="/" class="px-8 py-3 bg-blue-600 hover:bg-blue-700 rounded-xl font-bold transition shadow-xl">
+                        ← Dashboard
+                    </a>
+                </div>
+                
+                <div class="grid grid-cols-3 gap-6 mb-8">
+                    <div class="bg-gray-800 p-6 rounded-xl border border-gray-700">
+                        <h3 class="text-gray-400 mb-2">Total</h3>
+                        <div class="text-4xl font-bold text-white">{total}</div>
+                    </div>
+                    <div class="bg-green-900/30 p-6 rounded-xl border border-green-700">
+                        <h3 class="text-green-400 mb-2">✅ Approved</h3>
+                        <div class="text-4xl font-bold text-green-400">{approved}</div>
+                    </div>
+                    <div class="bg-red-900/30 p-6 rounded-xl border border-red-700">
+                        <h3 class="text-red-400 mb-2">❌ Rejected</h3>
+                        <div class="text-4xl font-bold text-red-400">{rejected}</div>
+                    </div>
+                </div>
+                
+                <div class="bg-gray-800 rounded-2xl overflow-hidden border border-gray-700 shadow-2xl">
+                    <table class="w-full">
+                        <thead class="bg-gray-900">
+                            <tr>
+                                <th class="p-4 text-left text-gray-400 font-semibold">ID</th>
+                                <th class="p-4 text-left text-gray-400 font-semibold">Request</th>
+                                <th class="p-4 text-left text-gray-400 font-semibold">Décision</th>
+                                <th class="p-4 text-left text-gray-400 font-semibold">Raison IA</th>
+                                <th class="p-4 text-left text-gray-400 font-semibold">Date</th>
+                            </tr>
+                        </thead>
+                        <tbody>{rows}</tbody>
+                    </table>
+                </div>
+                
+                <div class="text-center mt-6 text-gray-500 text-sm">
+                    100 dernières • DB: /config/staffai.db (persistant)
+                </div>
+            </div>
+        </body>
+        </html>
+        """.format(total=total, approved=approved, rejected=rejected, rows=html_rows)
+    except Exception as e:
+        return f"<h1>Erreur DB: {e}</h1>"
 
 @app.get("/health")
 async def health():
     return {
         "status": "healthy",
-        "version": "1.4",
+        "version": "1.5",
         "db": os.path.exists(DB_PATH),
         "openai": bool(get_openai_client()),
         "overseerr_configured": bool(headers.get("X-Api-Key"))
