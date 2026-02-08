@@ -1,66 +1,158 @@
 <!DOCTYPE html>
-<html>
+<html lang="fr">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PlexStaffAI Dashboard</title>
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .htmx-swapping { animation: fadeIn 0.3s ease-out; }
+    </style>
 </head>
-<body class="bg-gray-900 text-white p-8">
-    <div class="max-w-4xl mx-auto">
-        <h1 class="text-4xl font-bold mb-8 text-blue-400">🚀 PlexStaffAI Admin</h1>
+<body class="bg-gray-900 text-white font-sans antialiased">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        <!-- Header -->
+        <header class="text-center mb-16">
+            <h1 class="text-6xl font-black bg-gradient-to-r from-blue-400 via-purple-500 to-pink-500 bg-clip-text text-transparent mb-4 animate-pulse">
+                🚀 PlexStaffAI Admin
+            </h1>
+            <p class="text-2xl text-gray-400 font-light">IA Moderation Overseerr • Unraid Ready</p>
+            <div class="mt-4 inline-flex items-center gap-2 bg-emerald-900/30 px-6 py-2 rounded-full border border-emerald-700">
+                <span class="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></span>
+                <span class="text-emerald-300 font-semibold">Système Live</span>
+            </div>
+        </header>
         
-        <!-- Stats -->
-        <div class="grid grid-cols-3 gap-4 mb-8" id="stats">
-            <div class="bg-gray-800 p-6 rounded-lg">
-                <h3>Total Décisions</h3>
-                <div id="total" class="text-3xl font-bold text-green-400">--</div>
-            </div>
-            <div class="bg-gray-800 p-6 rounded-lg">
-                <h3>Dernier Run</h3>
-                <div id="last-run" class="text-xl">--</div>
-            </div>
-            <div class="bg-gray-800 p-6 rounded-lg">
-                <h3>Status Cron</h3>
-                <div id="cron-status" class="text-xl">--</div>
+        <!-- Stats Cards (Auto-refresh 30s) -->
+        <div id="stats-container" 
+             hx-get="/stats" 
+             hx-trigger="load, every 30s" 
+             hx-swap="innerHTML"
+             class="mb-12">
+            <!-- Stats chargées dynamiquement -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+                <div class="bg-gradient-to-br from-gray-800 to-gray-900 p-8 rounded-2xl shadow-2xl border border-gray-700 animate-pulse">
+                    <h3 class="text-lg font-semibold text-gray-400 mb-4">📊 Total</h3>
+                    <div class="text-4xl font-black text-gray-600">...</div>
+                </div>
+                <div class="bg-gradient-to-br from-indigo-900 to-purple-900 p-8 rounded-2xl shadow-2xl animate-pulse">
+                    <h3 class="text-lg font-semibold text-gray-300 mb-2">⏰ Dernier</h3>
+                    <div class="text-2xl font-bold text-gray-600">...</div>
+                </div>
+                <div class="bg-gradient-to-br from-emerald-900 to-teal-900 p-8 rounded-2xl shadow-2xl animate-pulse">
+                    <h3 class="text-lg font-semibold text-gray-300 mb-4">🔥 24h</h3>
+                    <div class="text-3xl font-bold text-gray-600">...</div>
+                </div>
             </div>
         </div>
 
-        <!-- Actions -->
-        <div class="flex gap-4 mb-8">
-            <button hx-get="/staff/moderate" 
-                    hx-target="#results" 
-                    hx-swap="innerHTML"
-                    class="bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded-lg font-bold">
-                🔄 Modérer Requests
+        <!-- Action Buttons -->
+        <div class="flex flex-col sm:flex-row gap-6 mb-12 justify-center items-center">
+            <button 
+                hx-get="/moderate-html" 
+                hx-target="#results" 
+                hx-swap="innerHTML"
+                hx-indicator="#loading"
+                class="w-full sm:w-auto bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 
+                       px-12 py-5 rounded-2xl font-bold text-xl shadow-2xl transform hover:scale-105 
+                       transition-all duration-300 text-white cursor-pointer border-2 border-blue-500/50">
+                🔄 MODÉRER REQUESTS
             </button>
-            <button hx-get="/staff/report" 
-                    hx-target="#report"
-                    class="bg-green-600 hover:bg-green-700 px-6 py-3 rounded-lg font-bold">
-                📊
-                Rapport IA
+            
+            <button 
+                hx-get="/stats" 
+                hx-target="#stats-container" 
+                hx-swap="innerHTML"
+                class="w-full sm:w-auto bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 
+                       px-12 py-5 rounded-2xl font-bold text-xl shadow-2xl transform hover:scale-105 
+                       transition-all duration-300 text-white cursor-pointer border-2 border-emerald-500/50">
+                📈 REFRESH STATS
             </button>
+            
+            <span id="loading" class="htmx-indicator text-blue-400 text-lg font-semibold">
+                ⏳ Chargement IA...
+            </span>
         </div>
 
-        <!-- Results -->
-        <div id="results" class="bg-gray-800 p-6 rounded-lg mb-4">
-            <h3>Résultats Récents</h3>
-            <div>Click Modérer pour commencer...</div>
+        <!-- Results Panel -->
+        <div id="results" 
+             class="bg-gray-800/50 backdrop-blur-xl p-8 rounded-3xl border border-gray-700 mb-8 min-h-[200px] shadow-2xl">
+            <h3 class="text-2xl font-bold mb-6 flex items-center">
+                <span class="w-3 h-3 bg-yellow-400 rounded-full mr-3 animate-pulse"></span>
+                Résultats Modération IA
+            </h3>
+            <div class="text-gray-400 text-lg">
+                👆 Clique <span class="text-blue-400 font-bold">"MODÉRER REQUESTS"</span> pour lancer l'IA GPT-4o-mini...
+            </div>
         </div>
 
-        <!-- Report -->
-        <div id="report" class="bg-indigo-900 p-6 rounded-lg">
-            <h3>Insights IA</h3>
-            <div>Click Rapport...</div>
+        <!-- API Endpoints Quick Links -->
+        <div class="bg-gradient-to-br from-purple-900/80 to-indigo-900/80 backdrop-blur-xl 
+                    p-8 rounded-3xl border border-purple-800/50 shadow-2xl">
+            <h3 class="text-2xl font-bold mb-6 flex items-center text-purple-300">
+                <span class="w-3 h-3 bg-purple-400 rounded-full mr-3 animate-pulse"></span>
+                🎯 API Endpoints
+            </h3>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <a href="/docs" target="_blank" 
+                   class="block p-4 bg-purple-800/30 rounded-xl hover:bg-purple-700/50 transition border border-purple-700">
+                    <div class="font-bold text-purple-300">📖 API Documentation</div>
+                    <div class="text-sm text-purple-400">/docs (Swagger UI)</div>
+                </a>
+                <a href="/health" target="_blank"
+                   class="block p-4 bg-emerald-800/30 rounded-xl hover:bg-emerald-700/50 transition border border-emerald-700">
+                    <div class="font-bold text-emerald-300">💚 Health Check</div>
+                    <div class="text-sm text-emerald-400">/health (Status JSON)</div>
+                </a>
+                <a href="/staff/report" target="_blank"
+                   class="block p-4 bg-indigo-800/30 rounded-xl hover:bg-indigo-700/50 transition border border-indigo-700">
+                    <div class="font-bold text-indigo-300">📊 Staff Report</div>
+                    <div class="text-sm text-indigo-400">/staff/report (Stats JSON)</div>
+                </a>
+                <a href="/staff/moderate" target="_blank"
+                   class="block p-4 bg-blue-800/30 rounded-xl hover:bg-blue-700/50 transition border border-blue-700">
+                    <div class="font-bold text-blue-300">🤖 Moderate API</div>
+                    <div class="text-sm text-blue-400">/staff/moderate (JSON)</div>
+                </a>
+            </div>
         </div>
+
+        <!-- Footer -->
+        <footer class="text-center mt-16 text-gray-500 text-sm space-y-2 pb-8">
+            <p class="text-lg">
+                Powered by 
+                <a href="https://github.com/malambert35/PlexStaffAI" 
+                   class="text-blue-400 hover:text-blue-300 font-semibold transition">
+                    PlexStaffAI v1.4
+                </a>
+            </p>
+            <p>
+                Docker Hub: 
+                <a href="https://hub.docker.com/r/tonpseudo/plexstaffai" 
+                   class="text-teal-400 hover:text-teal-300 transition">
+                    tonpseudo/plexstaffai
+                </a>
+            </p>
+            <p class="text-xs text-gray-600 mt-4">
+                OpenAI GPT-4o-mini • FastAPI • HTMX • Tailwind CSS
+            </p>
+        </footer>
     </div>
 
+    <!-- HTMX Config -->
     <script>
-        // Auto-refresh stats
-        setInterval(() => {
-            htmx.ajax('GET', '/staff/report', {
-                target: '#stats', swap: 'innerHTML'
-            })
-        }, 30000);
+        // Log HTMX events (debug)
+        document.body.addEventListener('htmx:afterRequest', function(evt) {
+            console.log('HTMX Request:', evt.detail.pathInfo.requestPath, evt.detail.successful ? '✅' : '❌');
+        });
+        
+        // Verify HTMX loaded
+        console.log('HTMX Version:', htmx.version || '❌ Not loaded');
     </script>
 </body>
 </html>
