@@ -1,23 +1,21 @@
-FROM python:3.12-slim AS builder
+FROM python:3.11-slim
+
+# Install system deps
+RUN apt-get update && apt-get install -y \
+    mediainfo cron curl gcc g++ \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
+
+# Copy & install Python deps (pré-build wheels)
 COPY requirements.txt .
-RUN pip install --no-cache-dir --upgrade pip && \
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     pip install --no-cache-dir -r requirements.txt
 
-FROM python:3.12-slim
-
-RUN apt-get update && apt-get install -y \
-    mediainfo cron curl tini \
-    && rm -rf /var/lib/apt/lists/* \
-    && apt-get clean
-
-WORKDIR /app
-COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/python3.12/site-packages
-COPY --from=builder /usr/local/bin /usr/local/bin
+# Copy app
 COPY . .
 RUN chmod +x entrypoint.sh
 
 VOLUME ["/config", "/logs"]
 EXPOSE 5056
-ENTRYPOINT ["/usr/bin/tini", "--", "./entrypoint.sh"]
+ENTRYPOINT ["./entrypoint.sh"]
