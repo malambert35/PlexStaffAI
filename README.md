@@ -8,11 +8,6 @@
 
 **🧪 Beta v1.6 Available:** Smart Rules + ML Feedback System → [Release Notes](https://github.com/malambert35/PlexStaffAI/releases/tag/v1.6.0-beta)
 
----
-
-(... reste du README inchangé ...)
-
-
 **Dashboard Web HTMX • Auto-Scan 15min • Historique Persistant • GPT-4o-mini**
 
 [🚀 Quickstart](#-quickstart-2min) • [📖 Documentation](#-configuration) • [💻 API](#-endpoints-api) • [🤝 Contribute](#-contribution)
