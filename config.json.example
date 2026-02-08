@@ -1,0 +1,5 @@
+{
+  "log_level": "INFO",
+  "cron_interval_minutes": 30,
+  "max_requests_per_batch": 10
+}
