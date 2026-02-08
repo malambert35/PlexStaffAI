@@ -43,7 +43,7 @@ jobs:
       uses: docker/metadata-action@v5
       with:
         images: |
-          tonpseudo/plexstaffai
+          malambert35/plexstaffai
         tags: |
           type=ref,event=branch
           type=ref,event=pr
@@ -67,4 +67,4 @@ jobs:
     - name: Image digest
       if: github.event_name == 'push' && github.ref == 'refs/heads/main'
       run: |
-        docker inspect tonpseudo/plexstaffai:latest
+        docker inspect malambert35/plexstaffai:latest
