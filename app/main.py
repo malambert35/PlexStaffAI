@@ -9,7 +9,7 @@ import json
 from openai import OpenAI
 import httpx
 
-app = FastAPI(title="PlexStaffAI", version="1.3")
+app = FastAPI(title="PlexStaffAI", version="1.4")
 OVERSEERR_URL = os.getenv("OVERSEERR_API_URL", "http://overseerr:5055") + "/api/v1"
 headers = {"X-Api-Key": os.getenv("OVERSEERR_API_KEY")}
 DB_PATH = "/config/staffai.db"
@@ -43,7 +43,7 @@ def init_db():
                       request_id INTEGER, decision TEXT, reason TEXT, timestamp TEXT)''')
         conn.commit()
         conn.close()
-        print("✅ DB v1.3 ready")
+        print("✅ DB v1.4 ready")
     except Exception as e:
         print(f"DB error: {e}")
 
@@ -117,10 +117,30 @@ async def staff_report():
 @app.get("/stats", response_class=HTMLResponse)
 async def stats_fragment():
     report = await staff_report()
-    return f"""
+    total = report.get('total', 0)
+    last_run = report.get('last_run', '--')
+    pct = report.get('pct', 0)
+    recent = report.get('recent_24h', 0)
+    
+    html = """
     <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
         <div class="bg-gradient-to-br from-gray-800 to-gray-900 p-8 rounded-2xl shadow-2xl border border-gray-700">
             <h3 class="text-lg font-semibold text-gray-400 mb-4">📊 Total</h3>
-            <div class="text-4xl font-black text-green-400">{report.get('total', 0)}</div>
+            <div class="text-4xl font-black text-green-400">{total}</div>
         </div>
-        <div class="bg-gradient-to-br from-indigo-900 to-purple-9
+        <div class="bg-gradient-to-br from-indigo-900 to-purple-900 p-8 rounded-2xl shadow-2xl">
+            <h3 class="text-lg font-semibold text-gray-300 mb-2">⏰ Dernier</h3>
+            <div class="text-2xl font-bold text-indigo-300">{last_run}</div>
+            <div class="text-sm text-indigo-400">{pct}% OK</div>
+        </div>
+        <div class="bg-gradient-to-br from-emerald-900 to-teal-900 p-8 rounded-2xl shadow-2xl">
+            <h3 class="text-lg font-semibold text-gray-300 mb-4">🔥 24h</h3>
+            <div class="text-3xl font-bold text-emerald-400">{recent}</div>
+        </div>
+    </div>
+    """.format(total=total, last_run=last_run, pct=pct, recent=recent)
+    return html
+
+@app.get("/health")
+async def health():
+    return {"status": "healthy", "db": os.path.exists(DB_PATH), "openai": bool(get_openai_client())}
