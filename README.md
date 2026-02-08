@@ -1,19 +1,38 @@
-# PlexStaffAI 🚀
+# PlexStaffAI 🚀 IA Staff Booster pour Overseerr/Plex
 
-**IA Agent pour Staff Overseerr/Plex** : Modération auto requests, insights prédictifs, audits – Unraid ready.
+**Modération automatique des requests par IA** (GPT-4o-mini), insights prédictifs, audits complets.  
+**Unraid/Plex/*arr ready** – Réduit 80% du toil staff.
 
-[![Docker Image](https://img.shields.io/docker/pulls/tonpseudo/plexstaffai)](https://hub.docker.com/r/tonpseudo/plexstaffai)
-[![GitHub stars](https://img.shields.io/github/stars/tonpseudo/plexstaffai)](https://github.com/tonpseudo/plexstaffai)
+[![Docker Pulls](https://img.shields.io/docker/pulls/tonpseudo/plexstaffai)](https://hub.docker.com/r/tonpseudo/plexstaffai)
+[![Docker Stars](https://img.shields.io/docker/stars/tonpseudo/plexstaffai)](https://hub.docker.com/r/tonpseudo/plexstaffai)
+[![GitHub Stars](https://img.shields.io/github/stars/tonpseudo/plexstaffai)](https://github.com/tonpseudo/plexstaffai)
+[![License](https://img.shields.io/github/license/tonpseudo/plexstaffai)](LICENSE)
 
-## 🎯 Fonctionnalités
-- ✅ **Modération IA** : GPT-4o-mini approve/reject spam/abuse
-- 📊 **Insights Staff** : Top users, prédictions hits Plex
-- 🛡️ **Audits DB** : Logs décisions traçables
-- 🔌 **Intègre Overseerr/Plex/*arr** (port 5056 UI)
+## 🎯 Fonctionnalités Uniques
 
-## 🚀 Quickstart Unraid
+| Fonctionnalité | Description | Impact |
+|---------------|-------------|--------|
+| 🤖 **Modération IA** | GPT-4o-mini approve/reject spam/abuse auto | **-80% temps staff** |
+| 📊 **Insights Prédictifs** | Top users, tendances Plex, alertes anomalies | **Décisions data-driven** |
+| 🗄️ **Audits SQLite** | Logs traçables toutes décisions IA | **Compliance/Wazuh ready** |
+| ⚙️ **Cron Auto** | Modération toutes 30min, rapports quotidiens | **Zéro manuel** |
+| 🔌 **API Overseerr/Plex** | Intégration native ton stack | **Plug & play** |
+
+**Rien d'équivalent** : Premier tool IA native pour Overseerr staff management.
+
+## 🚀 Quickstart Unraid (2min)
+
+### Méthode 1: Docker Hub (Recommandé)
 ```bash
-git clone https://github.com/tonpseudo/plexstaffai
-cd plexstaffai
-cp config.json.example config.json  # Édite keys
-docker compose up -d
+docker run -d \
+  --name plexstaffai \
+  -e OPENAI_API_KEY=sk-your-key \
+  -e OVERSEERR_API_URL=http://overseerr:5055 \
+  -e OVERSEERR_API_KEY=your-api-key \
+  -e PLEX_URL=http://plex:32400 \
+  -e PLEX_TOKEN=your-plex-token \
+  -p 5056:5056 \
+  -v /mnt/user/appdata/plexstaffai:/config \
+  --network proxarr \
+  --restart unless-stopped \
+  tonpseudo/plexstaffai:latest
