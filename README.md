@@ -131,12 +131,3 @@ Obtenir clés API :
 OpenAI : platform.openai.com/api-keys
 Overseerr : Settings → General → API Key
 
-
-| Variable          | Requis | Description                  | Exemple               |
-| ----------------- | ------ | ---------------------------- | --------------------- |
-| OPENAI_API_KEY    | ✅      | Clé API OpenAI GPT-4o-mini   | sk-proj-abc123...     |
-| OVERSEERR_API_URL | ✅      | URL Overseerr (sans /api/v1) | http://overseerr:5055 |
-| OVERSEERR_API_KEY | ✅      | API Key Overseerr            | xxxx-xxxx-xxxx        |
-| PLEX_URL          | ❌      | URL Plex (futur feature)     | http://plex:32400     |
-| PLEX_TOKEN        | ❌      | Token Plex (futur)           | xxxxxxxx              |
-| TZ                | ❌      | Timezone (logs)              | America/Montreal      |
