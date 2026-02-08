@@ -1,0 +1,10 @@
+fastapi==0.115.0
+uvicorn==0.32.0
+requests==2.32.3
+langchain-openai==0.2.2
+langchain-core==0.3.12
+langchain-community==0.3.2
+openai==1.51.0
+python-crontab==3.1.1
+python-multipart==0.0.9
+sqlite3
