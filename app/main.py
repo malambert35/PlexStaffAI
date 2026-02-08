@@ -1,401 +1,497 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from fastapi.responses import HTMLResponse
-import requests
-import os
-import sqlite3
-import datetime
-import json
-from openai import OpenAI
 import httpx
+import os
+from datetime import datetime, timedelta
+import sqlite3
+from pathlib import Path
+import json
 
-app = FastAPI(title="PlexStaffAI", version="1.5")
-OVERSEERR_URL = os.getenv("OVERSEERR_API_URL", "http://overseerr:5055") + "/api/v1"
-headers = {"X-Api-Key": os.getenv("OVERSEERR_API_KEY")}
-DB_PATH = "/config/staffai.db"
-_client = None
+# ✨ NOUVEAUX IMPORTS v1.6
+from config_loader import ConfigManager, SmartModerator, ModerationDecision
+from ml_feedback import FeedbackDatabase, EnhancedModerator
 
-# Lazy OpenAI (no crash startup)
-def get_openai_client():
-    global _client
-    if _client is None and os.getenv("OPENAI_API_KEY"):
-        try:
-            _client = OpenAI(
-                api_key=os.getenv("OPENAI_API_KEY"),
-                http_client=httpx.Client(proxies=None, timeout=30.0)
-            )
-            return _client
-        except Exception as e:
-            print(f"OpenAI init error: {e}")
-    return _client
+app = FastAPI(title="PlexStaffAI", version="1.6.0")
 
-# Static dashboard
-app.mount("/static", StaticFiles(directory="static"), name="static")
+# Configuration
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OVERSEERR_API_URL = os.getenv("OVERSEERR_API_URL", "http://overseerr:5055")
+OVERSEERR_API_KEY = os.getenv("OVERSEERR_API_KEY")
+
+# ✨ NOUVEAU: Charger config personnalisée + ML
+config = ConfigManager("/config/config.yaml")
+feedback_db = FeedbackDatabase("/config/feedback.db")
+moderator = EnhancedModerator(config, feedback_db)
+
+# Database
+DB_PATH = "/config/moderation.db"
 
 def init_db():
-    """Safe DB recreate"""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        c = conn.cursor()
-        c.execute('''CREATE TABLE IF NOT EXISTS decisions 
-                     (id INTEGER PRIMARY KEY AUTOINCREMENT,
-                      request_id INTEGER, decision TEXT, reason TEXT, timestamp TEXT)''')
-        conn.commit()
-        conn.close()
-        print("✅ DB v1.5 ready")
-    except Exception as e:
-        print(f"DB error: {e}")
+    """Initialize database with all tables"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Decisions table (historique)
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS decisions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            request_id INTEGER,
+            decision TEXT,
+            reason TEXT,
+            confidence REAL DEFAULT 1.0,
+            rule_matched TEXT DEFAULT 'legacy',
+            timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    
+    # ✨ NOUVEAU: Pending reviews table
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS pending_reviews (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            request_id INTEGER UNIQUE,
+            request_data JSON,
+            ai_decision TEXT,
+            ai_reason TEXT,
+            ai_confidence REAL,
+            status TEXT DEFAULT 'pending',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )
+    """)
+    
+    conn.commit()
+    conn.close()
 
 init_db()
 
+# Mount static files
+app.mount("/static", StaticFiles(directory="static"), name="static")
+
+
 @app.get("/", response_class=HTMLResponse)
 async def dashboard():
-    try:
-        with open("static/index.html", "r") as f:
-            return f.read()
-    except:
-        return "<h1>🚀 PlexStaffAI <br> Créez <code>static/index.html</code></h1>"
+    """Main dashboard"""
+    with open("static/index.html", "r") as f:
+        return f.read()
 
-@app.get("/staff/moderate")
-async def moderate_requests():
-    try:
-        client = get_openai_client()
-        resp = requests.get(f"{OVERSEERR_URL}/request?filter=pending&take=10&sort=added", 
-                          headers=headers, timeout=10)
-        reqs = resp.json().get('results', [])
-        results = []
-        conn = sqlite3.connect(DB_PATH)
-        
-        for req in reqs:
-            req_id = req.get('id')
-            
-            # EXTRACTION TITRE ROBUSTE
-            media = req.get('media', {})
-            title = (
-                media.get('title') or 
-                media.get('name') or 
-                media.get('originalTitle') or 
-                media.get('originalName') or 
-                f"TMDB-{media.get('tmdbId', '?')}"
-            )
-            
-            # Contexte additionnel
-            media_type = req.get('type', 'unknown')
-            requested_by = req.get('requestedBy', {}).get('displayName', 'Unknown')
-            year = media.get('releaseDate', '')[:4] if media.get('releaseDate') else ''
-            
-            print(f"[AUTO-MODERATE] #{req_id}: {title} ({media_type} {year}) by {requested_by}")
-            
-            # IA Decision avec CONTEXTE
-            if client:
-                try:
-                    prompt = f"""Plex Overseerr request analysis:
-- Title: {title}
-- Type: {media_type}
-- Year: {year or 'unknown'}
-- Requested by: {requested_by}
-
-Should staff APPROVE or REJECT? 
-Rules: Approve legitimate movies/shows. Reject spam, duplicates, inappropriate content.
-Answer: APPROVE or REJECT with brief reason (max 40 words)."""
-                    
-                    completion = client.chat.completions.create(
-                        model="gpt-4o-mini",
-                        max_tokens=60,
-                        temperature=0.2,
-                        messages=[{"role": "user", "content": prompt}]
-                    )
-                    decision = completion.choices[0].message.content.strip()
-                except Exception as e:
-                    decision = f"APPROVE - IA error: {str(e)[:30]}"
-            else:
-                decision = "APPROVE - No OpenAI key (default approve all)"
-            
-            action = "APPROVED" if "APPROVE" in decision.upper() else "REJECTED"
-            reason = decision[:120]
-            
-            # API OVERSEERR
-            try:
-                if action == "APPROVED":
-                    patch_resp = requests.post(
-                        f"{OVERSEERR_URL}/request/{req_id}/approve",
-                        headers=headers,
-                        timeout=10
-                    )
-                    api_status = "✅ Approved" if patch_resp.status_code == 200 else f"⚠️ Error {patch_resp.status_code}"
-                else:
-                    patch_resp = requests.post(
-                        f"{OVERSEERR_URL}/request/{req_id}/decline",
-                        headers=headers,
-                        timeout=10
-                    )
-                    api_status = "❌ Declined" if patch_resp.status_code == 200 else f"⚠️ Error {patch_resp.status_code}"
-            except Exception as e:
-                api_status = f"⚠️ API failed: {str(e)[:40]}"
-            
-            # Save DB
-            full_context = f"{title} ({media_type} {year}) by {requested_by}"
-            conn.execute("INSERT INTO decisions (request_id, decision, reason, timestamp) VALUES (?, ?, ?, ?)",
-                        (req_id, action, f"{full_context} | {reason} | {api_status}", datetime.datetime.now().isoformat()))
-            
-            results.append({
-                "id": req_id,
-                "title": full_context,
-                "action": action,
-                "reason": reason,
-                "api_status": api_status
-            })
-        
-        conn.commit()
-        conn.close()
-        return {"status": "success", "count": len(results), "results": results}
-    except Exception as e:
-        return {"status": "error", "message": str(e)}
-
-@app.get("/staff/report")
-async def staff_report():
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        total = conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0]
-        approved = conn.execute("SELECT COUNT(*) FROM decisions WHERE decision='APPROVED'").fetchone()[0]
-        pct = round((approved/total*100) if total else 0)
-        last_time = conn.execute("SELECT timestamp FROM decisions ORDER BY id DESC LIMIT 1").fetchone()
-        last_run = last_time[0][:16] if last_time else "--"
-        recent_count = conn.execute("SELECT COUNT(*) FROM decisions WHERE timestamp > datetime('now', '-1 day')").fetchone()[0]
-        conn.close()
-        return {
-            "total": total, "approved": approved, "pct": pct,
-            "last_run": last_run, "recent_24h": recent_count
-        }
-    except Exception as e:
-        return {"error": str(e), "total": 0, "last_run": "--"}
-
-@app.get("/stats", response_class=HTMLResponse)
-async def stats_fragment():
-    report = await staff_report()
-    total = report.get('total', 0)
-    last_run = report.get('last_run', '--')
-    pct = report.get('pct', 0)
-    recent = report.get('recent_24h', 0)
-    
-    html = """
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
-        <div class="bg-gradient-to-br from-gray-800 to-gray-900 p-8 rounded-2xl shadow-2xl border border-gray-700">
-            <h3 class="text-lg font-semibold text-gray-400 mb-4">📊 Total</h3>
-            <div class="text-4xl font-black text-green-400">{total}</div>
-        </div>
-        <div class="bg-gradient-to-br from-indigo-900 to-purple-900 p-8 rounded-2xl shadow-2xl">
-            <h3 class="text-lg font-semibold text-gray-300 mb-2">⏰ Dernier</h3>
-            <div class="text-2xl font-bold text-indigo-300">{last_run}</div>
-            <div class="text-sm text-indigo-400">{pct}% OK</div>
-        </div>
-        <div class="bg-gradient-to-br from-emerald-900 to-teal-900 p-8 rounded-2xl shadow-2xl">
-            <h3 class="text-lg font-semibold text-gray-300 mb-4">🔥 24h</h3>
-            <div class="text-3xl font-bold text-emerald-400">{recent}</div>
-        </div>
-    </div>
-    """.format(total=total, last_run=last_run, pct=pct, recent=recent)
-    return html
-
-@app.get("/debug/overseerr")
-async def debug_overseerr():
-    """Debug Overseerr API"""
-    try:
-        resp_all = requests.get(f"{OVERSEERR_URL}/request?take=10", headers=headers, timeout=10)
-        all_data = resp_all.json()
-        
-        resp_pending = requests.get(f"{OVERSEERR_URL}/request?filter=pending&take=10", headers=headers, timeout=10)
-        pending_data = resp_pending.json()
-        
-        statuses = {}
-        for req in all_data.get('results', []):
-            status = req.get('status', 'unknown')
-            statuses[status] = statuses.get(status, 0) + 1
-        
-        return {
-            "config": {
-                "overseerr_url": OVERSEERR_URL,
-                "api_key_configured": bool(headers.get("X-Api-Key"))
-            },
-            "results": {
-                "all_requests": all_data.get('pageInfo', {}).get('results', 0),
-                "filter_pending": pending_data.get('pageInfo', {}).get('results', 0)
-            },
-            "status_breakdown": statuses,
-            "sample_requests": [
-                {
-                    "id": r.get('id'),
-                    "title": r.get('media', {}).get('title'),
-                    "status": r.get('status')
-                } for r in all_data.get('results', [])[:3]
-            ]
-        }
-    except Exception as e:
-        return {"error": str(e)}
-
-@app.get("/moderate-html", response_class=HTMLResponse)
-async def moderate_html():
-    """HTML fragment modération"""
-    result = await moderate_requests()
-    
-    if result.get("status") == "error":
-        error_msg = result.get('message', 'Erreur inconnue')
-        return """
-        <div class="bg-red-900/50 p-6 rounded-xl border border-red-700">
-            <h3 class="text-xl font-bold text-red-300 mb-2">❌ Erreur</h3>
-            <p class="text-red-200">{error}</p>
-            <a href="/debug/overseerr" target="_blank" class="text-blue-400 underline text-sm mt-2 block">Debug</a>
-        </div>
-        """.format(error=error_msg)
-    
-    results = result.get('results', [])
-    count = result.get('count', 0)
-    
-    if count == 0:
-        return """
-        <div class="bg-yellow-900/50 p-6 rounded-xl border border-yellow-700">
-            <h3 class="text-xl font-bold text-yellow-300 mb-2">⚠️ Queue Vide</h3>
-            <p class="text-yellow-200">Aucune request pending</p>
-        </div>
-        """
-    
-    html_items = ""
-    for r in results:
-        action = r.get('action', 'UNKNOWN')
-        title = r.get('title', 'N/A')
-        req_id = r.get('id', '?')
-        reason = r.get('reason', 'No reason')
-        api_status = r.get('api_status', '')
-        color = "green" if action == "APPROVED" else "red"
-        icon = "✅" if action == "APPROVED" else "❌"
-        
-        html_items += """
-        <div class="p-4 bg-gray-700/50 rounded-lg border border-gray-600 hover:bg-gray-700 transition">
-            <div class="flex justify-between items-start mb-2">
-                <div class="flex-1">
-                    <span class="font-bold text-white text-lg">{title}</span>
-                    <span class="text-xs text-gray-400 ml-2">#{req_id}</span>
-                </div>
-                <div class="text-{color}-400 font-black text-2xl">{icon} {action}</div>
-            </div>
-            <div class="text-sm text-gray-300 italic mb-1 bg-gray-800/50 p-2 rounded">💬 {reason}</div>
-            <div class="text-xs text-gray-500 mt-1">{api_status}</div>
-        </div>
-        """.format(title=title, req_id=req_id, color=color, icon=icon, action=action, reason=reason, api_status=api_status)
-    
-    return """
-    <div class="bg-gray-800/50 backdrop-blur-xl p-8 rounded-3xl border border-gray-700">
-        <h3 class="text-2xl font-bold mb-6 flex items-center text-white">
-            <span class="w-3 h-3 bg-green-400 rounded-full mr-3 animate-pulse"></span>
-            ✅ Modération IA ({count} requests)
-        </h3>
-        <div class="space-y-3">{items}</div>
-        <div class="mt-6 p-4 bg-blue-900/30 rounded-lg border border-blue-700">
-            <p class="text-blue-300 text-sm">💡 Actions appliquées + enregistrées en DB</p>
-        </div>
-    </div>
-    """.format(count=count, items=html_items)
-
-@app.get("/history", response_class=HTMLResponse)
-async def history_page():
-    """Historique complet persistant"""
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        total = conn.execute("SELECT COUNT(*) FROM decisions").fetchone()[0]
-        approved = conn.execute("SELECT COUNT(*) FROM decisions WHERE decision='APPROVED'").fetchone()[0]
-        rejected = total - approved
-        
-        rows = conn.execute("""
-            SELECT id, request_id, decision, reason, timestamp 
-            FROM decisions 
-            ORDER BY id DESC 
-            LIMIT 100
-        """).fetchall()
-        conn.close()
-        
-        html_rows = ""
-        for row in rows:
-            db_id, req_id, decision, reason, timestamp = row
-            color = "text-green-400" if decision == "APPROVED" else "text-red-400"
-            icon = "✅" if decision == "APPROVED" else "❌"
-            time_short = timestamp[:16].replace('T', ' ')
-            
-            html_rows += """
-            <tr class="border-b border-gray-700 hover:bg-gray-800/50 transition">
-                <td class="p-3 text-gray-400 text-sm">#{db_id}</td>
-                <td class="p-3 text-white font-semibold">{req_id}</td>
-                <td class="p-3 {color} font-bold">{icon} {decision}</td>
-                <td class="p-3 text-gray-300 text-sm italic max-w-md truncate">{reason}</td>
-                <td class="p-3 text-gray-500 text-xs">{time}</td>
-            </tr>
-            """.format(db_id=db_id, req_id=req_id, color=color, icon=icon, decision=decision, reason=reason, time=time_short)
-        
-        return """
-        <!DOCTYPE html>
-        <html lang="fr">
-        <head>
-            <meta charset="UTF-8">
-            <meta name="viewport" content="width=device-width, initial-scale=1.0">
-            <title>Historique PlexStaffAI</title>
-            <script src="https://cdn.tailwindcss.com"></script>
-        </head>
-        <body class="bg-gray-900 text-white">
-            <div class="max-w-7xl mx-auto p-8">
-                <div class="flex justify-between items-center mb-8">
-                    <h1 class="text-5xl font-black bg-gradient-to-r from-purple-400 to-pink-500 bg-clip-text text-transparent">
-                        📜 Historique Modération
-                    </h1>
-                    <a href="/" class="px-8 py-3 bg-blue-600 hover:bg-blue-700 rounded-xl font-bold transition shadow-xl">
-                        ← Dashboard
-                    </a>
-                </div>
-                
-                <div class="grid grid-cols-3 gap-6 mb-8">
-                    <div class="bg-gray-800 p-6 rounded-xl border border-gray-700">
-                        <h3 class="text-gray-400 mb-2">Total</h3>
-                        <div class="text-4xl font-bold text-white">{total}</div>
-                    </div>
-                    <div class="bg-green-900/30 p-6 rounded-xl border border-green-700">
-                        <h3 class="text-green-400 mb-2">✅ Approved</h3>
-                        <div class="text-4xl font-bold text-green-400">{approved}</div>
-                    </div>
-                    <div class="bg-red-900/30 p-6 rounded-xl border border-red-700">
-                        <h3 class="text-red-400 mb-2">❌ Rejected</h3>
-                        <div class="text-4xl font-bold text-red-400">{rejected}</div>
-                    </div>
-                </div>
-                
-                <div class="bg-gray-800 rounded-2xl overflow-hidden border border-gray-700 shadow-2xl">
-                    <table class="w-full">
-                        <thead class="bg-gray-900">
-                            <tr>
-                                <th class="p-4 text-left text-gray-400 font-semibold">ID</th>
-                                <th class="p-4 text-left text-gray-400 font-semibold">Request</th>
-                                <th class="p-4 text-left text-gray-400 font-semibold">Décision</th>
-                                <th class="p-4 text-left text-gray-400 font-semibold">Raison IA</th>
-                                <th class="p-4 text-left text-gray-400 font-semibold">Date</th>
-                            </tr>
-                        </thead>
-                        <tbody>{rows}</tbody>
-                    </table>
-                </div>
-                
-                <div class="text-center mt-6 text-gray-500 text-sm">
-                    100 dernières • DB: /config/staffai.db (persistant)
-                </div>
-            </div>
-        </body>
-        </html>
-        """.format(total=total, approved=approved, rejected=rejected, rows=html_rows)
-    except Exception as e:
-        return f"<h1>Erreur DB: {e}</h1>"
 
 @app.get("/health")
-async def health():
+async def health_check():
+    """Health check endpoint"""
     return {
         "status": "healthy",
-        "version": "1.5",
-        "db": os.path.exists(DB_PATH),
-        "openai": bool(get_openai_client()),
-        "overseerr_configured": bool(headers.get("X-Api-Key"))
+        "version": "1.6.0",
+        "openai": "configured" if OPENAI_API_KEY else "missing",
+        "overseerr": "configured" if OVERSEERR_API_URL else "missing",
+        "ml_enabled": config.get("machine_learning.enabled", True)
     }
+
+
+def get_overseerr_requests():
+    """Fetch pending requests from Overseerr"""
+    try:
+        response = httpx.get(
+            f"{OVERSEERR_API_URL}/api/v1/request",
+            headers={"X-Api-Key": OVERSEERR_API_KEY},
+            params={"take": 50, "skip": 0, "filter": "pending"},
+            timeout=10.0
+        )
+        response.raise_for_status()
+        return response.json().get("results", [])
+    except Exception as e:
+        print(f"Error fetching Overseerr requests: {e}")
+        return []
+
+
+def approve_overseerr_request(request_id: int):
+    """Approve request in Overseerr"""
+    try:
+        response = httpx.post(
+            f"{OVERSEERR_API_URL}/api/v1/request/{request_id}/approve",
+            headers={"X-Api-Key": OVERSEERR_API_KEY},
+            timeout=10.0
+        )
+        response.raise_for_status()
+        return True
+    except Exception as e:
+        print(f"Error approving request {request_id}: {e}")
+        return False
+
+
+def decline_overseerr_request(request_id: int):
+    """Decline request in Overseerr"""
+    try:
+        response = httpx.post(
+            f"{OVERSEERR_API_URL}/api/v1/request/{request_id}/decline",
+            headers={"X-Api-Key": OVERSEERR_API_KEY},
+            timeout=10.0
+        )
+        response.raise_for_status()
+        return True
+    except Exception as e:
+        print(f"Error declining request {request_id}: {e}")
+        return False
+
+
+def moderate_request(request_id: int, request_data: dict) -> dict:
+    """Moderate request with smart rules + ML"""
+    
+    # Extract metadata from Overseerr
+    media = request_data.get('media', {})
+    title = (
+        media.get('title') or 
+        media.get('name') or 
+        media.get('originalTitle') or 
+        media.get('originalName') or 
+        f"TMDB-{media.get('tmdbId', 'unknown')}"
+    )
+    
+    media_type = media.get('mediaType', 'unknown')
+    year = media.get('releaseDate', '')[:4] if media.get('releaseDate') else ''
+    requested_by = request_data.get('requestedBy', {}).get('displayName', 'unknown')
+    user_id = str(request_data.get('requestedBy', {}).get('id', 'unknown'))
+    
+    # ✨ Enrichir data pour modération intelligente
+    enriched_data = {
+        'title': title,
+        'media_type': media_type,
+        'year': year,
+        'requested_by': requested_by,
+        'user_id': user_id,
+        'rating': media.get('voteAverage', 0),
+        'popularity': media.get('popularity', 0),
+        'genres': [g.get('name', '') for g in media.get('genres', [])],
+        'episode_count': sum(s.get('episodeCount', 0) for s in media.get('seasons', [])),
+        'season_count': len(media.get('seasons', [])),
+        'awards': [],  # TODO: Fetch from TMDB if available
+    }
+    
+    # Calculer user_age_days depuis Overseerr
+    user_created = request_data.get('requestedBy', {}).get('createdAt', '')
+    if user_created:
+        try:
+            created_date = datetime.fromisoformat(user_created.replace('Z', '+00:00'))
+            enriched_data['user_age_days'] = (datetime.now(created_date.tzinfo) - created_date).days
+        except:
+            enriched_data['user_age_days'] = 999
+    
+    # ✨ NOUVELLE LOGIQUE: Config rules + ML
+    decision_result = moderator.moderate_with_learning(enriched_data)
+    
+    decision = decision_result['decision']
+    reason = decision_result['reason']
+    confidence = decision_result.get('confidence', 1.0)
+    rule_matched = decision_result.get('rule_matched', 'none')
+    
+    # ✨ GESTION NEEDS_REVIEW
+    if decision == ModerationDecision.NEEDS_REVIEW:
+        save_for_review(request_id, enriched_data, decision_result)
+        return {
+            'decision': 'NEEDS_REVIEW',
+            'reason': reason,
+            'confidence': confidence,
+            'action': 'pending_staff_review'
+        }
+    
+    # Actions Overseerr (APPROVE/REJECT)
+    if decision == ModerationDecision.APPROVED:
+        approve_overseerr_request(request_id)
+    elif decision == ModerationDecision.REJECTED:
+        decline_overseerr_request(request_id)
+    
+    # Save to database
+    save_decision(request_id, decision, reason, confidence, rule_matched)
+    
+    return {
+        'request_id': request_id,
+        'decision': decision,
+        'reason': reason,
+        'confidence': confidence,
+        'rule_matched': rule_matched
+    }
+
+
+def save_for_review(request_id: int, request_data: dict, decision_result: dict):
+    """Save request for staff review"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        INSERT OR REPLACE INTO pending_reviews 
+        (request_id, request_data, ai_decision, ai_reason, ai_confidence)
+        VALUES (?, ?, ?, ?, ?)
+    """, (
+        request_id,
+        json.dumps(request_data),
+        decision_result['decision'],
+        decision_result['reason'],
+        decision_result.get('confidence', 0.5)
+    ))
+    
+    conn.commit()
+    conn.close()
+
+
+def save_decision(request_id: int, decision: str, reason: str, 
+                 confidence: float, rule_matched: str):
+    """Save decision to database"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        INSERT INTO decisions 
+        (request_id, decision, reason, confidence, rule_matched)
+        VALUES (?, ?, ?, ?, ?)
+    """, (request_id, decision, reason, confidence, rule_matched))
+    conn.commit()
+    conn.close()
+
+
+@app.get("/staff/moderate")
+@app.post("/staff/moderate")
+async def manual_moderate():
+    """Manually trigger moderation"""
+    requests = get_overseerr_requests()
+    
+    if not requests:
+        return {"message": "No pending requests", "moderated": 0}
+    
+    results = []
+    for req in requests:
+        result = moderate_request(req['id'], req)
+        results.append(result)
+    
+    return {
+        "message": f"Moderated {len(results)} requests",
+        "results": results
+    }
+
+
+@app.get("/staff/report")
+async def moderation_report():
+    """Get moderation statistics"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Total stats
+    cursor.execute("SELECT decision, COUNT(*) FROM decisions GROUP BY decision")
+    stats = dict(cursor.fetchall())
+    
+    # Last 24h
+    yesterday = (datetime.now() - timedelta(days=1)).isoformat()
+    cursor.execute(
+        "SELECT decision, COUNT(*) FROM decisions WHERE timestamp > ? GROUP BY decision",
+        (yesterday,)
+    )
+    last_24h = dict(cursor.fetchall())
+    
+    conn.close()
+    
+    total = sum(stats.values())
+    approved = stats.get('APPROVED', 0)
+    
+    return {
+        "total_decisions": total,
+        "approved": approved,
+        "rejected": stats.get('REJECTED', 0),
+        "needs_review": stats.get('NEEDS_REVIEW', 0),
+        "approval_rate": round(approved / total * 100, 1) if total > 0 else 0,
+        "last_24h": last_24h
+    }
+
+
+@app.get("/history")
+async def decision_history():
+    """Get last 100 decisions"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT request_id, decision, reason, confidence, rule_matched, timestamp 
+        FROM decisions 
+        ORDER BY timestamp DESC 
+        LIMIT 100
+    """)
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    decisions = []
+    for row in rows:
+        decisions.append({
+            'request_id': row[0],
+            'decision': row[1],
+            'reason': row[2],
+            'confidence': row[3],
+            'rule_matched': row[4],
+            'timestamp': row[5]
+        })
+    
+    return {"decisions": decisions}
+
+
+# ============================================
+# ✨ NOUVEAUX ENDPOINTS v1.6
+# ============================================
+
+@app.get("/review-dashboard", response_class=HTMLResponse)
+async def review_dashboard():
+    """Dashboard staff pour gérer NEEDS_REVIEW"""
+    with open("static/review_dashboard.html", "r") as f:
+        return f.read()
+
+
+@app.get("/staff/reviews")
+async def get_pending_reviews():
+    """Get pending review requests"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT request_id, request_data, ai_reason, ai_confidence, created_at
+        FROM pending_reviews
+        WHERE status = 'pending'
+        ORDER BY created_at DESC
+        LIMIT 50
+    """)
+    
+    rows = cursor.fetchall()
+    conn.close()
+    
+    reviews = []
+    for row in rows:
+        reviews.append({
+            'request_id': row[0],
+            'request_data': json.loads(row[1]),
+            'ai_reason': row[2],
+            'ai_confidence': row[3],
+            'created_at': row[4]
+        })
+    
+    return JSONResponse(content={'reviews': reviews})
+
+
+@app.post("/staff/review/approve/{request_id}")
+async def approve_review(request_id: int, request: Request):
+    """Staff approve a NEEDS_REVIEW request"""
+    body = await request.json() if request.headers.get('content-type') == 'application/json' else {}
+    staff_username = body.get('staff', 'admin')
+    
+    # Get request data
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT request_data, ai_decision FROM pending_reviews WHERE request_id = ?",
+        (request_id,)
+    )
+    row = cursor.fetchone()
+    
+    if not row:
+        raise HTTPException(404, "Review not found")
+    
+    request_data = json.loads(row[0])
+    ai_decision = row[1]
+    
+    # Record human feedback for ML
+    moderator.record_human_decision(
+        request_id=request_id,
+        request_data=request_data,
+        ai_decision=ai_decision,
+        human_decision='APPROVED',
+        human_reason=body.get('reason', 'Staff approved'),
+        staff_username=staff_username
+    )
+    
+    # Approve in Overseerr
+    approve_overseerr_request(request_id)
+    
+    # Update status
+    cursor.execute(
+        "UPDATE pending_reviews SET status = 'approved' WHERE request_id = ?",
+        (request_id,)
+    )
+    conn.commit()
+    conn.close()
+    
+    # Save to decisions
+    save_decision(request_id, 'APPROVED', 'Staff approved', 1.0, 'human_review')
+    
+    return {'status': 'approved', 'request_id': request_id}
+
+
+@app.post("/staff/review/reject/{request_id}")
+async def reject_review(request_id: int, request: Request):
+    """Staff reject a NEEDS_REVIEW request"""
+    body = await request.json()
+    staff_username = body.get('staff', 'admin')
+    reason = body.get('reason', 'Staff rejected')
+    
+    # Get request data
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "SELECT request_data, ai_decision FROM pending_reviews WHERE request_id = ?",
+        (request_id,)
+    )
+    row = cursor.fetchone()
+    
+    if not row:
+        raise HTTPException(404, "Review not found")
+    
+    request_data = json.loads(row[0])
+    ai_decision = row[1]
+    
+    # Record feedback
+    moderator.record_human_decision(
+        request_id=request_id,
+        request_data=request_data,
+        ai_decision=ai_decision,
+        human_decision='REJECTED',
+        human_reason=reason,
+        staff_username=staff_username
+    )
+    
+    # Reject in Overseerr
+    decline_overseerr_request(request_id)
+    
+    # Update status
+    cursor.execute(
+        "UPDATE pending_reviews SET status = 'rejected' WHERE request_id = ?",
+        (request_id,)
+    )
+    conn.commit()
+    conn.close()
+    
+    # Save
+    save_decision(request_id, 'REJECTED', reason, 1.0, 'human_review')
+    
+    return {'status': 'rejected', 'request_id': request_id}
+
+
+@app.get("/staff/pending-count")
+async def pending_count():
+    """Count pending reviews"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT COUNT(*) FROM pending_reviews WHERE status = 'pending'")
+    count = cursor.fetchone()[0]
+    conn.close()
+    return {'count': count}
+
+
+@app.get("/staff/ml-stats")
+async def ml_stats():
+    """ML system statistics"""
+    feedback_count = feedback_db.get_feedback_count(unlearned_only=False)
+    unlearned = feedback_db.get_feedback_count(unlearned_only=True)
+    
+    return {
+        'total_feedback': feedback_count,
+        'unlearned': unlearned,
+        'patterns_learned': feedback_count - unlearned,
+        'learning_threshold': 100
+    }
+
+
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=5056)
