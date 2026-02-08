@@ -1,32 +1,91 @@
-# PlexStaffAI 🚀 IA Staff Management pour Overseerr/Plex
+<div align="center">
 
-**Modération automatique IA des requests Overseerr** avec GPT-4o-mini, dashboard web HTMX, historique persistant et auto-scan cron.  
-**Unraid/*arr ready** – Réduit 80% du toil staff Plex.
+# 🚀 PlexStaffAI
 
-[![Docker Pulls](https://img.shields.io/docker/pulls/malambert35/plexstaffai)](https://hub.docker.com/r/malambert35/plexstaffai)
-[![Docker Stars](https://img.shields.io/docker/stars/malambert35/plexstaffai)](https://hub.docker.com/r/malambert35/plexstaffai)
-[![GitHub Stars](https://img.shields.io/github/stars/malambert35/PlexStaffAI)](https://github.com/malambert35/PlexStaffAI)
-[![License](https://img.shields.io/github/license/malambert35/PlexStaffAI)](LICENSE)
+### Modération Automatique IA pour Overseerr/Plex
+
+[![Docker Pulls](https://img.shields.io/docker/pulls/malambert35/plexstaffai?style=for-the-badge&logo=docker&logoColor=white)](https://hub.docker.com/r/malambert35/plexstaffai)
+[![GitHub Stars](https://img.shields.io/github/stars/malambert35/PlexStaffAI?style=for-the-badge&logo=github)](https://github.com/malambert35/PlexStaffAI)
+[![License](https://img.shields.io/github/license/malambert35/PlexStaffAI?style=for-the-badge)](LICENSE)
+[![Docker Image Size](https://img.shields.io/docker/image-size/malambert35/plexstaffai?style=for-the-badge&logo=docker)](https://hub.docker.com/r/malambert35/plexstaffai)
+
+**Dashboard Web HTMX • Auto-Scan 15min • Historique Persistant • GPT-4o-mini**
+
+[🚀 Quickstart](#-quickstart-2min) • [📖 Documentation](#-configuration) • [💻 API](#-endpoints-api) • [🤝 Contribute](#-contribution)
 
 ---
 
-## 🎯 Fonctionnalités v1.5
+</div>
 
-| Feature | Description | Impact |
-|---------|-------------|--------|
-| 🤖 **Modération IA GPT-4o-mini** | Approve/reject automatique requests Overseerr avec raisons contextuelles | **-80% temps staff** |
-| 🌐 **Dashboard Web HTMX** | Interface moderne temps réel (Tailwind CSS + HTMX) | **UI pro sans JS build** |
-| 📜 **Historique Persistant** | Base SQLite 100 dernières décisions (survit reboots) | **Audits complets** |
-| ⏰ **Auto-Scan 15min** | Cron automatique modère queue Overseerr sans intervention | **Zéro manuel** |
-| 🔗 **API Overseerr Native** | Vraie intégration approve/decline (pas mock) | **Actions réelles** |
-| 📊 **Stats Temps Réel** | Total décisions, % approved, activité 24h (auto-refresh 30s) | **Métriques live** |
-| 🛡️ **Context-Aware IA** | Titre, type, année, user → décisions intelligentes | **Précision optimale** |
+## ⚡ Pourquoi PlexStaffAI ?
+
+> **80% de temps staff économisé** avec modération IA contextuelle automatique
+
+| Avant | Après PlexStaffAI |
+|-------|-------------------|
+| ❌ Modération manuelle 24/7 | ✅ Auto-scan toutes les 15min |
+| ❌ Décisions subjectives incohérentes | ✅ IA GPT-4o-mini contextuelle |
+| ❌ Pas d'historique auditable | ✅ Base SQLite persistante |
+| ❌ Interface Overseerr basique | ✅ Dashboard moderne HTMX temps réel |
+| ❌ Zéro insights staff performance | ✅ Stats live (%, 24h, total) |
+
+---
+
+## 🎯 Fonctionnalités Clés
+
+<table>
+<tr>
+<td width="50%">
+
+### 🤖 Modération IA
+- GPT-4o-mini context-aware
+- Approve/Reject automatique
+- Raisons détaillées affichées
+- Extraction titre robuste (multi-path)
+- Fallback configurable (default approve)
+
+</td>
+<td width="50%">
+
+### ⏰ Auto-Scan Cron
+- Scan automatique 15min (configurable)
+- Logs persistants `/logs/auto-moderate.log`
+- Zéro intervention manuelle requise
+- Force manual avec bouton dashboard
+- Health monitoring `/health`
+
+</td>
+</tr>
+<tr>
+<td width="50%">
+
+### 🌐 Dashboard HTMX
+- Interface moderne Tailwind CSS
+- Auto-refresh stats 30s
+- Fragment loading (pas de refresh page)
+- Responsive mobile-ready
+- Actions temps réel AJAX
+
+</td>
+<td width="50%">
+
+### 📜 Historique SQLite
+- 100 dernières décisions tabulées
+- Persistance volume Docker `/config`
+- Stats globales (total, %, 24h)
+- Audit trail complet
+- Survit reboots/upgrades
+
+</td>
+</tr>
+</table>
 
 ---
 
 ## 🚀 Quickstart (2min)
 
-### Docker Compose (Recommandé)
+### Option 1: Docker Compose (Recommandé Unraid)
+
 ```yaml
 version: '3.8'
 services:
@@ -37,8 +96,6 @@ services:
       - OPENAI_API_KEY=sk-your-openai-key
       - OVERSEERR_API_URL=http://overseerr:5055
       - OVERSEERR_API_KEY=your-overseerr-api-key
-      - PLEX_URL=http://plex:32400
-      - PLEX_TOKEN=your-plex-token
       - TZ=America/Montreal
     volumes:
       - /mnt/user/appdata/plexstaffai:/config
@@ -47,8 +104,3 @@ services:
     networks:
       - proxarr
     restart: unless-stopped
-networks:
-  proxarr:
-    external: true
-
-
