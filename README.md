@@ -104,3 +104,29 @@ services:
     networks:
       - proxarr
     restart: unless-stopped
+```
+
+Option 2: Docker Run
+
+```
+docker run -d \
+  --name plexstaffai \
+  -e OPENAI_API_KEY=sk-xxx \
+  -e OVERSEERR_API_URL=http://overseerr:5055 \
+  -e OVERSEERR_API_KEY=xxx \
+  -p 5056:5056 \
+  -v /mnt/user/appdata/plexstaffai:/config \
+  --restart unless-stopped \
+  malambert35/plexstaffai:latest
+```
+
+Option 3: Portainer Stack
+
+Portainer → Stacks → Add Stack
+Colle le docker-compose ci-dessus
+Édite les variables OPENAI_API_KEY et OVERSEERR_API_KEY
+Deploy Stack
+Accès: http://ton-unraid:5056/
+Obtenir clés API :
+OpenAI : platform.openai.com/api-keys
+Overseerr : Settings → General → API Key
