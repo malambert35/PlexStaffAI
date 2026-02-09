@@ -12,19 +12,51 @@
             to { opacity: 1; transform: translateY(0); }
         }
         .htmx-swapping { animation: fadeIn 0.3s ease-out; }
+        
+        /* Animation badge flottant */
+        @keyframes bounce {
+            0%, 100% { transform: translateY(0); }
+            50% { transform: translateY(-10px); }
+        }
+        .animate-bounce-slow {
+            animation: bounce 3s ease-in-out infinite;
+        }
     </style>
 </head>
 <body class="bg-gray-900 text-white font-sans antialiased">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <!-- Header -->
-        <header class="text-center mb-16">
-            <h1 class="text-6xl font-black bg-gradient-to-r from-blue-400 via-purple-500 to-pink-500 bg-clip-text text-transparent mb-4 animate-pulse">
-                🚀 PlexStaffAI Admin
-            </h1>
-            <p class="text-2xl text-gray-400 font-light">IA Moderation Overseerr • Auto-Scan 15min</p>
-            <div class="mt-4 inline-flex items-center gap-2 bg-emerald-900/30 px-6 py-2 rounded-full border border-emerald-700">
-                <span class="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></span>
-                <span class="text-emerald-300 font-semibold">Système Live • Cron Actif</span>
+        
+        <!-- ✨ NOUVEAU HEADER AVEC BOUTON REVIEW DASHBOARD -->
+        <header class="mb-16">
+            <div class="flex flex-col lg:flex-row justify-between items-center gap-6 mb-8">
+                <div class="text-center lg:text-left">
+                    <h1 class="text-5xl lg:text-6xl font-black bg-gradient-to-r from-blue-400 via-purple-500 to-pink-500 bg-clip-text text-transparent mb-4 animate-pulse">
+                        🚀 PlexStaffAI Admin
+                    </h1>
+                    <p class="text-xl lg:text-2xl text-gray-400 font-light">
+                        IA Moderation Overseerr • Auto-Scan 15min
+                    </p>
+                    <p class="text-sm text-gray-500 mt-2">v1.6.0-dev • Smart Rules + ML Learning</p>
+                </div>
+                
+                <!-- 🆕 BOUTON REVIEW DASHBOARD -->
+                <a href="/review-dashboard" 
+                   class="group bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 
+                          px-8 py-4 rounded-2xl font-bold text-xl shadow-2xl transform hover:scale-105 
+                          transition-all duration-300 text-black flex items-center gap-3 border-2 border-yellow-400">
+                    <span class="text-3xl group-hover:animate-bounce">🧑‍⚖️</span>
+                    <div class="text-left">
+                        <div class="text-lg font-bold">Review Dashboard</div>
+                        <div class="text-xs opacity-75">Manage pending reviews</div>
+                    </div>
+                </a>
+            </div>
+            
+            <div class="text-center">
+                <div class="inline-flex items-center gap-2 bg-emerald-900/30 px-6 py-2 rounded-full border border-emerald-700">
+                    <span class="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></span>
+                    <span class="text-emerald-300 font-semibold">Système Live • Cron Actif</span>
+                </div>
             </div>
         </header>
         
@@ -136,26 +168,89 @@
                 Powered by 
                 <a href="https://github.com/malambert35/PlexStaffAI" 
                    class="text-blue-400 hover:text-blue-300 font-semibold transition">
-                    PlexStaffAI v1.6
+                    PlexStaffAI v1.6.0-dev
                 </a>
             </p>
-            <p>
-                Docker Hub: 
-                <a href="https://hub.docker.com/r/tonpseudo/plexstaffai" 
+            <div class="flex justify-center gap-4 text-sm mt-2">
+                <a href="/review-dashboard" class="text-yellow-400 hover:text-yellow-300 transition">
+                    🧑‍⚖️ Review Dashboard
+                </a>
+                <span class="text-gray-700">•</span>
+                <a href="/staff/report" class="text-blue-400 hover:text-blue-300 transition">
+                    📊 Full Report
+                </a>
+                <span class="text-gray-700">•</span>
+                <a href="https://hub.docker.com/r/malambert35/plexstaffai" 
+                   target="_blank"
                    class="text-teal-400 hover:text-teal-300 transition">
-                    malambert35/plexstaffai
+                    🐳 Docker Hub
                 </a>
-            </p>
+            </div>
             <p class="text-xs text-gray-600 mt-4">
-                OpenAI GPT-4o-mini • FastAPI • HTMX • Cron 15min
+                OpenAI GPT-4o-mini • FastAPI • HTMX • Cron 15min • Smart Rules + ML
             </p>
         </footer>
     </div>
 
+    <!-- ✨ NOUVEAU: BADGE FLOTTANT AVEC COMPTEUR -->
+    <a href="/review-dashboard" 
+       id="review-badge"
+       class="fixed bottom-8 right-8 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 
+              text-black px-6 py-4 rounded-full shadow-2xl hover:shadow-yellow-500/50 
+              transition-all duration-300 font-bold flex items-center gap-3 z-50 
+              transform hover:scale-110 animate-bounce-slow border-2 border-yellow-400">
+        <span class="text-2xl">🧑‍⚖️</span>
+        <div class="hidden sm:block text-left">
+            <div class="text-xs opacity-75 leading-tight">Pending</div>
+            <div class="text-sm font-bold leading-tight">Reviews</div>
+        </div>
+        <span id="pending-count" 
+              class="bg-red-500 text-white px-3 py-1 rounded-full text-sm font-black shadow-lg">
+            0
+        </span>
+    </a>
+
     <script>
+        // Update pending reviews count
+        function updatePendingCount() {
+            fetch('/staff/pending-count')
+                .then(r => r.json())
+                .then(data => {
+                    const badge = document.getElementById('pending-count');
+                    const reviewBadge = document.getElementById('review-badge');
+                    
+                    badge.textContent = data.count;
+                    
+                    if (data.count === 0) {
+                        reviewBadge.classList.add('opacity-60');
+                        badge.classList.add('hidden');
+                    } else {
+                        reviewBadge.classList.remove('opacity-60');
+                        badge.classList.remove('hidden');
+                        
+                        // Pulse animation si > 0
+                        if (data.count > 0) {
+                            badge.classList.add('animate-pulse');
+                        }
+                    }
+                })
+                .catch(err => {
+                    console.log('Pending count endpoint not available yet');
+                });
+        }
+        
+        // Initial load
+        updatePendingCount();
+        
+        // Refresh every 30s
+        setInterval(updatePendingCount, 30000);
+        
+        // HTMX logging
         document.body.addEventListener('htmx:afterRequest', function(evt) {
             console.log('HTMX:', evt.detail.pathInfo.requestPath, evt.detail.successful ? '✅' : '❌');
         });
+        
+        console.log('✅ PlexStaffAI v1.6.0-dev loaded');
         console.log('HTMX Version:', htmx.version || '❌ Not loaded');
     </script>
 </body>
