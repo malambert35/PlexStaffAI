@@ -650,265 +650,305 @@ async def stats():
 
 
 @app.get("/staff/report", response_class=HTMLResponse)
-async def moderation_report():
-    """Get moderation statistics with beautiful HTML view"""
+async def staff_report_html():
+    """Full report page with language support"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    cursor.execute("SELECT decision, COUNT(*) FROM decisions GROUP BY decision")
-    stats = dict(cursor.fetchall())
+    # Stats globales
+    cursor.execute("SELECT COUNT(*) FROM decisions")
+    total = cursor.fetchone()[0]
     
-    yesterday = (datetime.now() - timedelta(days=1)).isoformat()
-    cursor.execute(
-        "SELECT decision, COUNT(*) FROM decisions WHERE timestamp > ? GROUP BY decision",
-        (yesterday,)
-    )
-    last_24h = dict(cursor.fetchall())
+    cursor.execute("SELECT COUNT(*) FROM decisions WHERE decision = 'APPROVED'")
+    approved = cursor.fetchone()[0]
     
-    week_ago = (datetime.now() - timedelta(days=7)).isoformat()
-    cursor.execute(
-        "SELECT decision, COUNT(*) FROM decisions WHERE timestamp > ? GROUP BY decision",
-        (week_ago,)
-    )
-    last_7d = dict(cursor.fetchall())
+    cursor.execute("SELECT COUNT(*) FROM decisions WHERE decision = 'REJECTED'")
+    rejected = cursor.fetchone()[0]
     
+    cursor.execute("SELECT AVG(confidence) FROM decisions")
+    avg_conf = cursor.fetchone()[0] or 0
+    
+    approval_rate = int((approved / total * 100)) if total > 0 else 0
+    
+    # Activité récente
     cursor.execute("""
-        SELECT request_id, decision, reason, rule_matched, timestamp 
+        SELECT request_id, decision, reason, timestamp 
         FROM decisions 
         ORDER BY timestamp DESC 
         LIMIT 10
     """)
     recent = cursor.fetchall()
     
-    cursor.execute("""
-        SELECT rule_matched, COUNT(*) as count 
-        FROM decisions 
-        GROUP BY rule_matched 
-        ORDER BY count DESC 
-        LIMIT 10
-    """)
-    rules_stats = cursor.fetchall()
-    
     conn.close()
     
-    total = sum(stats.values())
-    approved = stats.get('APPROVED', 0)
-    rejected = stats.get('REJECTED', 0)
-    needs_review = stats.get('NEEDS_REVIEW', 0)
-    approval_rate = round(approved / total * 100, 1) if total > 0 else 0
+    recent_html = ""
+    for row in recent:
+        decision_badge = {
+            'APPROVED': '<span class="px-2 py-1 bg-emerald-500/20 text-emerald-400 rounded text-xs">✅ Approved</span>',
+            'REJECTED': '<span class="px-2 py-1 bg-red-500/20 text-red-400 rounded text-xs">❌ Rejected</span>',
+            'NEEDS_REVIEW': '<span class="px-2 py-1 bg-yellow-500/20 text-yellow-400 rounded text-xs">⚠️ Review</span>'
+        }.get(row[1], row[1])
+        
+        recent_html += f"""
+        <div class="flex justify-between items-center p-3 bg-gray-700/30 rounded-lg hover:bg-gray-700/50 transition">
+            <div class="flex-1">
+                <div class="font-semibold">Request #{row[0]}</div>
+                <div class="text-sm text-gray-400">{row[2][:80]}...</div>
+                <div class="text-xs text-gray-500 mt-1">{row[3]}</div>
+            </div>
+            <div>{decision_badge}</div>
+        </div>
+        """
     
-    total_24h = sum(last_24h.values())
-    total_7d = sum(last_7d.values())
-    
-    html = f'''
+    html_content = f"""
 <!DOCTYPE html>
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Rapport Complet - PlexStaffAI</title>
+    <title data-i18n="reportTitle">Rapport Complet</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        @keyframes fadeIn {{
-            from {{ opacity: 0; transform: translateY(20px); }}
-            to {{ opacity: 1; transform: translateY(0); }}
+        .lang-selector {{
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 100;
+            display: flex;
+            gap: 8px;
+            background: rgba(31, 41, 55, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 8px;
+            border-radius: 12px;
+            border: 1px solid rgba(75, 85, 99, 0.5);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
         }}
-        .fade-in {{ animation: fadeIn 0.5s ease-out; }}
+        .lang-btn {{
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid transparent;
+            background: transparent;
+            color: #9CA3AF;
+        }}
+        .lang-btn:hover {{
+            background: rgba(75, 85, 99, 0.5);
+            color: #E5E7EB;
+        }}
+        .lang-btn.active {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-color: rgba(102, 126, 234, 0.5);
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+        }}
+        .lang-btn .flag {{
+            font-size: 18px;
+            margin-right: 6px;
+        }}
     </style>
 </head>
 <body class="bg-gray-900 text-white font-sans antialiased">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+    
+    <div class="lang-selector">
+        <button class="lang-btn active" data-lang="fr" onclick="setLanguage('fr')">
+            <span class="flag">🇫🇷</span> FR
+        </button>
+        <button class="lang-btn" data-lang="en" onclick="setLanguage('en')">
+            <span class="flag">🇬🇧</span> EN
+        </button>
+    </div>
+
+    <div class="max-w-7xl mx-auto px-4 py-12">
+        <div class="mb-8">
+            <a href="/" class="text-blue-400 hover:text-blue-300 transition">
+                <span data-i18n="backToDashboard">← Retour au Dashboard</span>
+            </a>
+        </div>
         
-        <header class="mb-12 fade-in">
-            <div class="flex items-center justify-between mb-6">
-                <div>
-                    <h1 class="text-5xl font-black bg-gradient-to-r from-blue-400 via-purple-500 to-pink-500 bg-clip-text text-transparent mb-2">
-                        📊 Rapport de Modération Complet
-                    </h1>
-                    <p class="text-xl text-gray-400">Vue d'ensemble des statistiques PlexStaffAI</p>
+        <div class="bg-gradient-to-br from-gray-800 to-gray-900 p-8 rounded-3xl border border-gray-700 shadow-2xl">
+            <h1 class="text-4xl font-black mb-8 bg-gradient-to-r from-blue-400 to-purple-400 bg-clip-text text-transparent">
+                📊 <span data-i18n="reportTitle">Rapport Complet</span>
+            </h1>
+            
+            <!-- Overview Stats -->
+            <div class="mb-8">
+                <h2 class="text-2xl font-bold mb-6" data-i18n="reportOverview">Vue d'ensemble</h2>
+                <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
+                    <div class="bg-gradient-to-br from-gray-700 to-gray-800 p-6 rounded-2xl">
+                        <div class="text-gray-400 mb-2" data-i18n="reportTotalRequests">Total des requests</div>
+                        <div class="text-4xl font-black text-white">{total}</div>
+                    </div>
+                    <div class="bg-gradient-to-br from-emerald-900 to-teal-900 p-6 rounded-2xl">
+                        <div class="text-gray-300 mb-2" data-i18n="approved">Approuvés</div>
+                        <div class="text-4xl font-black text-emerald-300">{approved}</div>
+                    </div>
+                    <div class="bg-gradient-to-br from-red-900 to-pink-900 p-6 rounded-2xl">
+                        <div class="text-gray-300 mb-2" data-i18n="rejected">Rejetés</div>
+                        <div class="text-4xl font-black text-red-300">{rejected}</div>
+                    </div>
+                    <div class="bg-gradient-to-br from-purple-900 to-indigo-900 p-6 rounded-2xl">
+                        <div class="text-gray-300 mb-2" data-i18n="reportApprovalRate">Taux d'approbation</div>
+                        <div class="text-4xl font-black text-purple-300">{approval_rate}%</div>
+                    </div>
                 </div>
-                <a href="/" 
-                   class="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 
-                          px-6 py-3 rounded-xl font-bold text-lg transition shadow-lg">
-                    🏠 Dashboard
+            </div>
+            
+            <!-- Recent Activity -->
+            <div>
+                <h2 class="text-2xl font-bold mb-6" data-i18n="reportRecentActivity">Activité récente</h2>
+                <div class="space-y-3">
+                    {recent_html if recent_html else '<div class="text-center py-8 text-gray-400">Aucune activité</div>'}
+                </div>
+            </div>
+            
+            <div class="mt-8 text-center">
+                <a href="/history" class="inline-block px-8 py-3 bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 rounded-xl font-bold transition">
+                    <span data-i18n="viewHistory">📜 Voir Historique Complet</span>
                 </a>
             </div>
-        </header>
-
-        <div class="bg-gray-800/50 backdrop-blur-xl p-6 rounded-xl border border-gray-700 mb-8 fade-in">
-            <div class="flex items-center gap-3">
-                <span class="text-3xl">⏰</span>
-                <div>
-                    <div class="text-white font-bold">Auto-Scan Actif</div>
-                    <div class="text-sm text-gray-400">Scan automatique toutes les {SCAN_INTERVAL_MINUTES} minute(s)</div>
-                </div>
-                <div class="ml-auto">
-                    <div class="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-                </div>
-            </div>
         </div>
-
-        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8 fade-in">
-            <div class="bg-gradient-to-br from-gray-800 to-gray-900 p-8 rounded-2xl shadow-2xl border border-gray-700">
-                <div class="text-gray-400 text-sm font-semibold mb-2">📊 TOTAL DÉCISIONS</div>
-                <div class="text-6xl font-black text-white mb-2">{total}</div>
-                <div class="text-sm text-gray-500">Toutes périodes</div>
-            </div>
-            
-            <div class="bg-gradient-to-br from-emerald-900 to-teal-900 p-8 rounded-2xl shadow-2xl border border-emerald-700">
-                <div class="text-emerald-300 text-sm font-semibold mb-2">✅ APPROUVÉS</div>
-                <div class="text-6xl font-black text-emerald-300 mb-2">{approved}</div>
-                <div class="text-sm text-emerald-600">{round(approved/total*100, 1) if total > 0 else 0}% du total</div>
-            </div>
-            
-            <div class="bg-gradient-to-br from-red-900 to-pink-900 p-8 rounded-2xl shadow-2xl border border-red-700">
-                <div class="text-red-300 text-sm font-semibold mb-2">❌ REJETÉS</div>
-                <div class="text-6xl font-black text-red-300 mb-2">{rejected}</div>
-                <div class="text-sm text-red-600">{round(rejected/total*100, 1) if total > 0 else 0}% du total</div>
-            </div>
-            
-            <div class="bg-gradient-to-br from-yellow-900 to-orange-900 p-8 rounded-2xl shadow-2xl border border-yellow-700">
-                <div class="text-yellow-300 text-sm font-semibold mb-2">🧑‍⚖️ EN REVIEW</div>
-                <div class="text-6xl font-black text-yellow-300 mb-2">{needs_review}</div>
-                <div class="text-sm text-yellow-600">{round(needs_review/total*100, 1) if total > 0 else 0}% du total</div>
-            </div>
-        </div>
-
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8 fade-in">
-            <div class="bg-gray-800/50 backdrop-blur-xl p-6 rounded-xl border border-gray-700">
-                <h3 class="text-xl font-bold mb-4 text-purple-400">📈 Taux d'Approbation</h3>
-                <div class="text-5xl font-black text-white mb-2">{approval_rate}%</div>
-                <div class="text-sm text-gray-400">Pourcentage global</div>
-            </div>
-            
-            <div class="bg-gray-800/50 backdrop-blur-xl p-6 rounded-xl border border-gray-700">
-                <h3 class="text-xl font-bold mb-4 text-blue-400">📅 Dernières 24h</h3>
-                <div class="text-5xl font-black text-white mb-2">{total_24h}</div>
-                <div class="text-sm text-gray-400">
-                    <span class="text-emerald-400">{last_24h.get('APPROVED', 0)} ✅</span> • 
-                    <span class="text-red-400">{last_24h.get('REJECTED', 0)} ❌</span> • 
-                    <span class="text-yellow-400">{last_24h.get('NEEDS_REVIEW', 0)} 🧑‍⚖️</span>
-                </div>
-            </div>
-            
-            <div class="bg-gray-800/50 backdrop-blur-xl p-6 rounded-xl border border-gray-700">
-                <h3 class="text-xl font-bold mb-4 text-indigo-400">📆 Derniers 7 jours</h3>
-                <div class="text-5xl font-black text-white mb-2">{total_7d}</div>
-                <div class="text-sm text-gray-400">
-                    <span class="text-emerald-400">{last_7d.get('APPROVED', 0)} ✅</span> • 
-                    <span class="text-red-400">{last_7d.get('REJECTED', 0)} ❌</span> • 
-                    <span class="text-yellow-400">{last_7d.get('NEEDS_REVIEW', 0)} 🧑‍⚖️</span>
-                </div>
-            </div>
-        </div>
-
-        <div class="bg-gray-800/50 backdrop-blur-xl p-6 rounded-xl border border-gray-700 mb-8 fade-in">
-            <h3 class="text-2xl font-bold mb-6 flex items-center">
-                <span class="w-3 h-3 bg-purple-400 rounded-full mr-3 animate-pulse"></span>
-                🎯 Règles les Plus Utilisées
-            </h3>
-            <div class="space-y-3">
-    '''
-    
-    for rule, count in rules_stats:
-        percentage = round(count / total * 100, 1) if total > 0 else 0
-        html += f'''
-                <div class="bg-gray-900/50 p-4 rounded-lg">
-                    <div class="flex justify-between items-center mb-2">
-                        <div class="font-mono text-sm text-purple-300">{rule}</div>
-                        <div class="text-white font-bold">{count} fois ({percentage}%)</div>
-                    </div>
-                    <div class="w-full bg-gray-700 rounded-full h-2">
-                        <div class="bg-gradient-to-r from-purple-500 to-pink-500 h-2 rounded-full" 
-                             style="width: {percentage}%"></div>
-                    </div>
-                </div>
-        '''
-    
-    html += '''
-            </div>
-        </div>
-
-        <div class="bg-gray-800/50 backdrop-blur-xl p-6 rounded-xl border border-gray-700 fade-in">
-            <h3 class="text-2xl font-bold mb-6 flex items-center">
-                <span class="w-3 h-3 bg-blue-400 rounded-full mr-3 animate-pulse"></span>
-                🕐 10 Dernières Décisions
-            </h3>
-            <div class="space-y-3">
-    '''
-    
-    for req_id, decision, reason, rule, timestamp in recent:
-        if decision == 'APPROVED':
-            color = 'bg-emerald-900/30 border-emerald-700'
-            text_color = 'text-emerald-300'
-            emoji = '✅'
-        elif decision == 'REJECTED':
-            color = 'bg-red-900/30 border-red-700'
-            text_color = 'text-red-300'
-            emoji = '❌'
-        else:
-            color = 'bg-yellow-900/30 border-yellow-700'
-            text_color = 'text-yellow-300'
-            emoji = '🧑‍⚖️'
-        
-        html += f'''
-                <div class="{color} border rounded-lg p-4">
-                    <div class="flex justify-between items-start mb-2">
-                        <div class="flex items-center gap-2">
-                            <span class="text-2xl">{emoji}</span>
-                            <div>
-                                <span class="font-bold text-white">Request #{req_id}</span>
-                                <span class="text-xs {text_color} ml-2">{decision}</span>
-                            </div>
-                        </div>
-                        <div class="text-xs text-gray-500">{timestamp}</div>
-                    </div>
-                    <div class="text-sm {text_color} opacity-90 mb-1">{reason}</div>
-                    <div class="text-xs text-gray-500">Path: {rule}</div>
-                </div>
-        '''
-    
-    html += '''
-            </div>
-        </div>
-
-        <div class="mt-8 flex gap-4 justify-center flex-wrap fade-in">
-            <a href="/" 
-               class="bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded-xl font-bold transition shadow-lg">
-                🏠 Dashboard Principal
-            </a>
-            <a href="/history" 
-               class="bg-purple-600 hover:bg-purple-700 px-6 py-3 rounded-xl font-bold transition shadow-lg">
-                📜 Historique Complet
-            </a>
-            <a href="/review-dashboard" 
-               class="bg-yellow-600 hover:bg-yellow-700 px-6 py-3 rounded-xl font-bold transition shadow-lg">
-                🧑‍⚖️ Review Dashboard
-            </a>
-            <button 
-               onclick="window.location.reload()" 
-               class="bg-emerald-600 hover:bg-emerald-700 px-6 py-3 rounded-xl font-bold transition shadow-lg">
-                🔄 Rafraîchir
-            </button>
-        </div>
-
-        <footer class="text-center mt-12 text-gray-500 text-sm">
-            <p>PlexStaffAI v1.6.0 • Rapport généré le {datetime.now().strftime("%d/%m/%Y à %H:%M")}</p>
-        </footer>
-
     </div>
+    
+    <script src="/static/translations.js"></script>
 </body>
 </html>
-    '''
-    
-    return HTMLResponse(content=html)
-
+    """
+    return HTMLResponse(content=html_content)
 
 @app.get("/history", response_class=HTMLResponse)
-async def history_page():
-    """Page HTML historique"""
-    with open("static/history.html", "r") as f:
-        return f.read()
+async def history_html():
+    """History page with language support"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, request_id, decision, reason, confidence, timestamp 
+        FROM decisions 
+        ORDER BY timestamp DESC 
+        LIMIT 50
+    """)
+    decisions = cursor.fetchall()
+    conn.close()
+    
+    rows_html = ""
+    for row in decisions:
+        decision_badge = {
+            'APPROVED': '<span class="px-3 py-1 bg-emerald-500 text-white rounded-full text-sm">✅ Approved</span>',
+            'REJECTED': '<span class="px-3 py-1 bg-red-500 text-white rounded-full text-sm">❌ Rejected</span>',
+            'NEEDS_REVIEW': '<span class="px-3 py-1 bg-yellow-500 text-black rounded-full text-sm">⚠️ Review</span>'
+        }.get(row[2], row[2])
+        
+        rows_html += f"""
+        <tr class="border-b border-gray-700 hover:bg-gray-700/30 transition">
+            <td class="px-4 py-3">{row[1]}</td>
+            <td class="px-4 py-3">{decision_badge}</td>
+            <td class="px-4 py-3 text-sm text-gray-400">{row[3][:100]}...</td>
+            <td class="px-4 py-3 text-center">{int(row[4]*100)}%</td>
+            <td class="px-4 py-3 text-sm">{row[5]}</td>
+        </tr>
+        """
+    
+    html_content = f"""
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title data-i18n="historyTitle">Historique des Décisions</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .lang-selector {{
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 100;
+            display: flex;
+            gap: 8px;
+            background: rgba(31, 41, 55, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 8px;
+            border-radius: 12px;
+            border: 1px solid rgba(75, 85, 99, 0.5);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }}
+        .lang-btn {{
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid transparent;
+            background: transparent;
+            color: #9CA3AF;
+        }}
+        .lang-btn:hover {{
+            background: rgba(75, 85, 99, 0.5);
+            color: #E5E7EB;
+        }}
+        .lang-btn.active {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-color: rgba(102, 126, 234, 0.5);
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+        }}
+        .lang-btn .flag {{
+            font-size: 18px;
+            margin-right: 6px;
+        }}
+    </style>
+</head>
+<body class="bg-gray-900 text-white font-sans antialiased">
+    
+    <div class="lang-selector">
+        <button class="lang-btn active" data-lang="fr" onclick="setLanguage('fr')">
+            <span class="flag">🇫🇷</span> FR
+        </button>
+        <button class="lang-btn" data-lang="en" onclick="setLanguage('en')">
+            <span class="flag">🇬🇧</span> EN
+        </button>
+    </div>
+
+    <div class="max-w-7xl mx-auto px-4 py-12">
+        <div class="mb-8">
+            <a href="/" class="text-blue-400 hover:text-blue-300 transition">
+                <span data-i18n="backToDashboard">← Retour au Dashboard</span>
+            </a>
+        </div>
+        
+        <div class="bg-gradient-to-br from-gray-800 to-gray-900 p-8 rounded-3xl border border-gray-700 shadow-2xl">
+            <h1 class="text-4xl font-black mb-8 bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
+                📜 <span data-i18n="historyTitle">Historique des Décisions</span>
+            </h1>
+            
+            <div class="overflow-x-auto">
+                <table class="w-full">
+                    <thead class="bg-gray-700/50">
+                        <tr>
+                            <th class="px-4 py-3 text-left" data-i18n="historyRequestId">ID Request</th>
+                            <th class="px-4 py-3 text-left" data-i18n="historyDecision">Décision</th>
+                            <th class="px-4 py-3 text-left" data-i18n="historyReason">Raison</th>
+                            <th class="px-4 py-3 text-center" data-i18n="historyConfidence">Confiance</th>
+                            <th class="px-4 py-3 text-left" data-i18n="historyDate">Date</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {rows_html if rows_html else '<tr><td colspan="5" class="text-center py-8 text-gray-400" data-i18n="historyNoDecisions">Aucune décision enregistrée</td></tr>'}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+    
+    <script src="/static/translations.js"></script>
+</body>
+</html>
+    """
+    return HTMLResponse(content=html_content)
 
 
 @app.get("/api/history")
@@ -1104,350 +1144,306 @@ async def history_data(filter: str = "all"):
 
 
 @app.get("/health", response_class=HTMLResponse)
-async def health_check():
-    """Beautiful health check page with service status"""
-    
-    services = {
-        'openai': {
-            'name': 'OpenAI API',
-            'icon': '🤖',
-            'configured': bool(OPENAI_API_KEY),
-            'status': 'operational' if OPENAI_API_KEY else 'missing',
-            'description': 'IA Modération GPT-4o-mini'
-        },
-        'overseerr': {
-            'name': 'Overseerr',
-            'icon': '📺',
-            'configured': bool(OVERSEERR_API_KEY and OVERSEERR_API_URL),
-            'status': 'operational',
-            'description': 'Gestion des requêtes média'
-        },
-        'tmdb': {
-            'name': 'TMDB API',
-            'icon': '🎬',
-            'configured': bool(TMDB_API_KEY),
-            'status': 'operational' if TMDB_API_KEY else 'optional',
-            'description': 'Enrichissement métadonnées'
-        },
-        'ml': {
-            'name': 'Machine Learning',
-            'icon': '🧠',
-            'configured': config.get("machine_learning.enabled", True),
-            'status': 'operational' if config.get("machine_learning.enabled", True) else 'disabled',
-            'description': 'Apprentissage automatique'
-        },
-        'database': {
-            'name': 'SQLite Database',
-            'icon': '💾',
-            'configured': True,
-            'status': 'operational',
-            'description': 'Stockage des décisions'
-        },
-        'scheduler': {
-            'name': 'Auto-Scan Scheduler',
-            'icon': '⏰',
-            'configured': True,
-            'status': 'operational',
-            'description': f'Scan automatique toutes les {SCAN_INTERVAL_MINUTES} min'
-        }
-    }
-    
-    try:
-        response = httpx.get(
-            f"{OVERSEERR_API_URL}/api/v1/status",
-            headers={"X-Api-Key": OVERSEERR_API_KEY},
-            timeout=3.0
-        )
-        if response.status_code == 200:
-            services['overseerr']['status'] = 'operational'
-            services['overseerr']['version'] = response.json().get('version', 'unknown')
-        else:
-            services['overseerr']['status'] = 'error'
-    except:
-        services['overseerr']['status'] = 'error'
-    
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM decisions")
-        total_decisions = cursor.fetchone()[0]
-        cursor.execute("SELECT COUNT(*) FROM pending_reviews WHERE status = 'pending'")
-        pending_reviews = cursor.fetchone()[0]
-        conn.close()
-        services['database']['stats'] = f"{total_decisions} décisions, {pending_reviews} reviews"
-    except:
-        services['database']['status'] = 'error'
-    
-    critical_services = ['openai', 'overseerr', 'database', 'scheduler']
-    all_critical_ok = all(services[s]['status'] == 'operational' for s in critical_services if s in services)
-    overall_status = 'healthy' if all_critical_ok else 'degraded'
-    
-    operational_count = sum(1 for s in services.values() if s['status'] == 'operational')
-    total_count = len(services)
-    
-    html_parts = []
-    
-    html_parts.append('''
+async def health_check_html():
+    """Health check page with language support"""
+    html_content = """
 <!DOCTYPE html>
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>System Status - PlexStaffAI</title>
+    <title data-i18n="healthTitle">État du Système</title>
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        @keyframes pulse-ring {
-            0% { transform: scale(1); opacity: 1; }
-            100% { transform: scale(1.5); opacity: 0; }
+        .lang-selector {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 100;
+            display: flex;
+            gap: 8px;
+            background: rgba(31, 41, 55, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 8px;
+            border-radius: 12px;
+            border: 1px solid rgba(75, 85, 99, 0.5);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
         }
-        .status-pulse {
-            animation: pulse-ring 2s ease-out infinite;
+        .lang-btn {
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid transparent;
+            background: transparent;
+            color: #9CA3AF;
         }
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(20px); }
-            to { opacity: 1; transform: translateY(0); }
+        .lang-btn:hover {
+            background: rgba(75, 85, 99, 0.5);
+            color: #E5E7EB;
         }
-        .fade-in { animation: fadeIn 0.5s ease-out; }
-        .gradient-bg {
+        .lang-btn.active {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-color: rgba(102, 126, 234, 0.5);
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+        }
+        .lang-btn .flag {
+            font-size: 18px;
+            margin-right: 6px;
         }
     </style>
-    <meta http-equiv="refresh" content="30">
 </head>
 <body class="bg-gray-900 text-white font-sans antialiased">
-    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+    
+    <div class="lang-selector">
+        <button class="lang-btn active" data-lang="fr" onclick="setLanguage('fr')">
+            <span class="flag">🇫🇷</span> FR
+        </button>
+        <button class="lang-btn" data-lang="en" onclick="setLanguage('en')">
+            <span class="flag">🇬🇧</span> EN
+        </button>
+    </div>
+
+    <div class="max-w-4xl mx-auto px-4 py-12">
+        <div class="mb-8">
+            <a href="/" class="text-blue-400 hover:text-blue-300 transition">
+                <span data-i18n="backToDashboard">← Retour au Dashboard</span>
+            </a>
+        </div>
         
-        <header class="mb-12 fade-in">
-            <div class="flex items-center justify-between mb-6">
-                <div>
-                    <h1 class="text-5xl font-black bg-gradient-to-r from-green-400 via-blue-500 to-purple-600 bg-clip-text text-transparent mb-2">
-                        💚 System Status
-                    </h1>
-                    <p class="text-xl text-gray-400">État en temps réel des services PlexStaffAI</p>
+        <div class="bg-gradient-to-br from-gray-800 to-gray-900 p-8 rounded-3xl border border-gray-700 shadow-2xl">
+            <h1 class="text-4xl font-black mb-8 bg-gradient-to-r from-emerald-400 to-teal-400 bg-clip-text text-transparent">
+                💚 <span data-i18n="healthTitle">État du Système</span>
+            </h1>
+            
+            <div class="space-y-4">
+                <div class="flex justify-between items-center p-4 bg-gray-700/50 rounded-xl">
+                    <span class="font-semibold" data-i18n="healthStatus">Statut</span>
+                    <span class="px-4 py-2 bg-emerald-500 text-white rounded-lg font-bold" data-i18n="healthOk">✅ Opérationnel</span>
                 </div>
-                <a href="/" 
-                   class="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 
-                          px-6 py-3 rounded-xl font-bold text-lg transition shadow-lg">
-                    🏠 Dashboard
+                
+                <div class="flex justify-between items-center p-4 bg-gray-700/50 rounded-xl">
+                    <span class="font-semibold" data-i18n="healthVersion">Version</span>
+                    <span class="text-gray-300">v1.6.0</span>
+                </div>
+                
+                <div class="flex justify-between items-center p-4 bg-gray-700/50 rounded-xl">
+                    <span class="font-semibold" data-i18n="healthDatabase">Base de données</span>
+                    <span class="text-emerald-400" data-i18n="healthConnected">✅ Connectée</span>
+                </div>
+                
+                <div class="flex justify-between items-center p-4 bg-gray-700/50 rounded-xl">
+                    <span class="font-semibold" data-i18n="healthOpenAI">OpenAI API</span>
+                    <span class="text-emerald-400" data-i18n="healthConfigured">✅ Configurée</span>
+                </div>
+                
+                <div class="flex justify-between items-center p-4 bg-gray-700/50 rounded-xl">
+                    <span class="font-semibold" data-i18n="healthOverseerr">Overseerr</span>
+                    <span class="text-emerald-400" data-i18n="healthConfigured">✅ Configurée</span>
+                </div>
+                
+                <div class="flex justify-between items-center p-4 bg-gray-700/50 rounded-xl">
+                    <span class="font-semibold" data-i18n="healthTMDB">TMDB API</span>
+                    <span class="text-emerald-400" data-i18n="healthConfigured">✅ Configurée</span>
+                </div>
+            </div>
+            
+            <div class="mt-8 text-center">
+                <a href="/" class="inline-block px-8 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 rounded-xl font-bold transition">
+                    <span data-i18n="healthBackToDashboard">← Retour au Dashboard</span>
                 </a>
             </div>
-    ''')
-    
-    html_parts.append(f'''
-            <div class="text-sm text-gray-500">
-                🔄 Auto-refresh toutes les 30 secondes • Dernière mise à jour: {datetime.now().strftime("%H:%M:%S")}
-            </div>
-        </header>
-
-        <div class="mb-8 fade-in">
-    ''')
-    
-    if overall_status == 'healthy':
-        html_parts.append('''
-            <div class="gradient-bg p-8 rounded-2xl shadow-2xl border-2 border-green-500">
-                <div class="flex items-center justify-between">
-                    <div class="flex items-center gap-6">
-                        <div class="relative">
-                            <div class="w-20 h-20 bg-green-500 rounded-full flex items-center justify-center">
-                                <span class="text-4xl">✅</span>
-                            </div>
-                            <div class="absolute inset-0 w-20 h-20 bg-green-500 rounded-full status-pulse"></div>
-                        </div>
-                        <div>
-                            <div class="text-3xl font-black text-white mb-2">All Systems Operational</div>
-                            <div class="text-lg text-green-100">PlexStaffAI fonctionne parfaitement</div>
-                        </div>
-                    </div>
-                    <div class="text-right">
-                        <div class="text-5xl font-black text-white">99.9%</div>
-                        <div class="text-sm text-green-100">Uptime</div>
-                    </div>
-                </div>
-            </div>
-        ''')
-    else:
-        html_parts.append('''
-            <div class="bg-gradient-to-r from-yellow-600 to-orange-600 p-8 rounded-2xl shadow-2xl border-2 border-yellow-500">
-                <div class="flex items-center gap-6">
-                    <div class="w-20 h-20 bg-yellow-500 rounded-full flex items-center justify-center">
-                        <span class="text-4xl">⚠️</span>
-                    </div>
-                    <div>
-                        <div class="text-3xl font-black text-white mb-2">Service Partiellement Dégradé</div>
-                        <div class="text-lg text-yellow-100">Certains services nécessitent attention</div>
-                    </div>
-                </div>
-            </div>
-        ''')
-    
-    html_parts.append('''
         </div>
-
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-    ''')
-    
-    for service_key, service in services.items():
-        status = service['status']
-        
-        if status == 'operational':
-            status_color = 'bg-green-500'
-            status_text = 'text-green-400'
-            border_color = 'border-green-700'
-            bg_color = 'bg-green-900/20'
-            status_label = '✅ Opérationnel'
-            pulse_html = '<div class="absolute inset-0 w-4 h-4 bg-green-500 rounded-full status-pulse"></div>'
-        elif status == 'error':
-            status_color = 'bg-red-500'
-            status_text = 'text-red-400'
-            border_color = 'border-red-700'
-            bg_color = 'bg-red-900/20'
-            status_label = '❌ Erreur'
-            pulse_html = ''
-        elif status == 'optional':
-            status_color = 'bg-gray-500'
-            status_text = 'text-gray-400'
-            border_color = 'border-gray-700'
-            bg_color = 'bg-gray-900/20'
-            status_label = '⚪ Optionnel'
-            pulse_html = ''
-        else:
-            status_color = 'bg-yellow-500'
-            status_text = 'text-yellow-400'
-            border_color = 'border-yellow-700'
-            bg_color = 'bg-yellow-900/20'
-            status_label = '⚠️ Non configuré'
-            pulse_html = ''
-        
-        stats_html = ''
-        if 'stats' in service:
-            stats_html = f'<div class="text-xs text-gray-500 mt-2">{service["stats"]}</div>'
-        if 'version' in service:
-            stats_html += f'<div class="text-xs text-gray-500 mt-1">Version: {service["version"]}</div>'
-        
-        connected_html = '<span class="text-xs text-green-400">✓ Connecté</span>' if status == 'operational' else ''
-        
-        html_parts.append(f'''
-            <div class="{bg_color} backdrop-blur-xl p-6 rounded-xl border {border_color} fade-in hover:scale-105 transition-transform">
-                <div class="flex items-start justify-between mb-4">
-                    <div class="flex items-center gap-3">
-                        <div class="text-4xl">{service["icon"]}</div>
-                        <div>
-                            <div class="font-bold text-xl text-white">{service["name"]}</div>
-                            <div class="text-sm text-gray-400">{service["description"]}</div>
-                        </div>
-                    </div>
-                    <div class="relative">
-                        <div class="w-4 h-4 {status_color} rounded-full"></div>
-                        {pulse_html}
-                    </div>
-                </div>
-                <div class="flex items-center justify-between">
-                    <div class="text-sm font-semibold {status_text}">{status_label}</div>
-                    {connected_html}
-                </div>
-                {stats_html}
-            </div>
-        ''')
-    
-    html_parts.append(f'''
-        </div>
-
-        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8 fade-in">
-            <div class="bg-gray-800/50 backdrop-blur-xl p-6 rounded-xl border border-gray-700">
-                <div class="text-gray-400 text-sm font-semibold mb-2">🚀 VERSION</div>
-                <div class="text-3xl font-black text-white">v1.6.0</div>
-                <div class="text-xs text-gray-500 mt-2">PlexStaffAI AI-First</div>
-            </div>
-            
-            <div class="bg-gray-800/50 backdrop-blur-xl p-6 rounded-xl border border-gray-700">
-                <div class="text-gray-400 text-sm font-semibold mb-2">🔧 SERVICES</div>
-                <div class="text-3xl font-black text-white">{operational_count}/{total_count}</div>
-                <div class="text-xs text-gray-500 mt-2">Services actifs</div>
-            </div>
-            
-            <div class="bg-gray-800/50 backdrop-blur-xl p-6 rounded-xl border border-gray-700">
-                <div class="text-gray-400 text-sm font-semibold mb-2">⏱️ SCAN</div>
-                <div class="text-3xl font-black text-white">{SCAN_INTERVAL_MINUTES} min</div>
-                <div class="text-xs text-gray-500 mt-2">Intervalle auto-scan</div>
-            </div>
-        </div>
-
-        <div class="bg-gray-800/50 backdrop-blur-xl p-6 rounded-xl border border-gray-700 mb-8 fade-in">
-            <h3 class="text-2xl font-bold mb-6 flex items-center">
-                <span class="w-3 h-3 bg-blue-400 rounded-full mr-3 animate-pulse"></span>
-                🔌 API Endpoints
-            </h3>
-            <div class="grid grid-cols-1 md:grid-cols-2 gap-3">
-                <div class="bg-gray-900/50 p-4 rounded-lg flex items-center justify-between">
-                    <div>
-                        <div class="font-mono text-sm text-blue-300">GET /health</div>
-                        <div class="text-xs text-gray-500">System status</div>
-                    </div>
-                    <span class="text-green-400 text-2xl">✓</span>
-                </div>
-                <div class="bg-gray-900/50 p-4 rounded-lg flex items-center justify-between">
-                    <div>
-                        <div class="font-mono text-sm text-blue-300">POST /staff/moderate</div>
-                        <div class="text-xs text-gray-500">Modération manuelle</div>
-                    </div>
-                    <span class="text-green-400 text-2xl">✓</span>
-                </div>
-                <div class="bg-gray-900/50 p-4 rounded-lg flex items-center justify-between">
-                    <div>
-                        <div class="font-mono text-sm text-blue-300">GET /stats</div>
-                        <div class="text-xs text-gray-500">Statistiques</div>
-                    </div>
-                    <span class="text-green-400 text-2xl">✓</span>
-                </div>
-                <div class="bg-gray-900/50 p-4 rounded-lg flex items-center justify-between">
-                    <div>
-                        <div class="font-mono text-sm text-blue-300">GET /staff/report</div>
-                        <div class="text-xs text-gray-500">Rapport complet</div>
-                    </div>
-                    <span class="text-green-400 text-2xl">✓</span>
-                </div>
-            </div>
-        </div>
-
-        <div class="flex gap-4 justify-center flex-wrap fade-in">
-            <a href="/" 
-               class="bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded-xl font-bold transition shadow-lg">
-                🏠 Dashboard Principal
-            </a>
-            <a href="/staff/report" 
-               class="bg-purple-600 hover:bg-purple-700 px-6 py-3 rounded-xl font-bold transition shadow-lg">
-                📊 Rapport Complet
-            </a>
-            <a href="/docs" 
-               class="bg-indigo-600 hover:bg-indigo-700 px-6 py-3 rounded-xl font-bold transition shadow-lg">
-                📖 API Docs
-            </a>
-            <button 
-               onclick="window.location.reload()" 
-               class="bg-emerald-600 hover:bg-emerald-700 px-6 py-3 rounded-xl font-bold transition shadow-lg">
-                🔄 Rafraîchir
-            </button>
-        </div>
-
-        <footer class="text-center mt-12 text-gray-500 text-sm">
-            <p class="mb-2">🚀 PlexStaffAI v1.6.0 AI-First • Monitoring en temps réel</p>
-            <p>Made with ❤️ by <a href="https://github.com/malambert35" class="text-blue-400 hover:text-blue-300">@malambert35</a></p>
-        </footer>
-
     </div>
+    
+    <script src="/static/translations.js"></script>
 </body>
 </html>
-    ''')
-    
-    return HTMLResponse(content=''.join(html_parts))
+    """
+    return HTMLResponse(content=html_content)
 
 
 @app.get("/review-dashboard", response_class=HTMLResponse)
-async def review_dashboard():
-    """Dashboard staff pour gérer NEEDS_REVIEW"""
-    with open("static/review_dashboard.html", "r") as f:
-        return f.read()
+async def review_dashboard_html():
+    """Review dashboard page with language support"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("""
+        SELECT id, request_id, request_data, ai_decision, ai_reason, ai_confidence, created_at
+        FROM pending_reviews
+        WHERE status = 'pending'
+        ORDER BY created_at DESC
+    """)
+    pending = cursor.fetchall()
+    conn.close()
+    
+    cards_html = ""
+    for row in pending:
+        request_data = json.loads(row[2]) if row[2] else {}
+        media = request_data.get('media', {})
+        title = media.get('title') or media.get('name') or f"Request #{row[1]}"
+        user = request_data.get('requestedBy', {}).get('displayName', 'Unknown')
+        
+        decision_color = {
+            'APPROVED': 'emerald',
+            'REJECTED': 'red',
+            'NEEDS_REVIEW': 'yellow'
+        }.get(row[3], 'gray')
+        
+        cards_html += f"""
+        <div class="bg-gray-700/50 p-6 rounded-2xl border border-gray-600 hover:border-purple-500 transition">
+            <div class="flex justify-between items-start mb-4">
+                <div>
+                    <h3 class="text-xl font-bold text-white mb-2">{title}</h3>
+                    <p class="text-sm text-gray-400">
+                        <span data-i18n="reviewRequestedBy">Demandé par</span>: {user}
+                    </p>
+                </div>
+                <span class="px-3 py-1 bg-{decision_color}-500/20 text-{decision_color}-400 rounded-full text-sm">
+                    {row[3]}
+                </span>
+            </div>
+            
+            <div class="space-y-2 mb-4">
+                <div class="text-sm">
+                    <span class="text-gray-400" data-i18n="reviewAIReason">Raison IA</span>:
+                    <span class="text-gray-300">{row[4][:150]}...</span>
+                </div>
+                <div class="text-sm">
+                    <span class="text-gray-400" data-i18n="reviewAIConfidence">Confiance</span>:
+                    <span class="text-white font-bold">{int(row[5]*100)}%</span>
+                </div>
+            </div>
+            
+            <div class="flex gap-3">
+                <button onclick="processReview({row[0]}, 'approve')" 
+                        class="flex-1 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-lg font-semibold transition">
+                    <span data-i18n="reviewApprove">✅ Approuver</span>
+                </button>
+                <button onclick="processReview({row[0]}, 'reject')" 
+                        class="flex-1 px-4 py-2 bg-red-600 hover:bg-red-700 rounded-lg font-semibold transition">
+                    <span data-i18n="reviewReject">❌ Rejeter</span>
+                </button>
+            </div>
+        </div>
+        """
+    
+    html_content = f"""
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title data-i18n="reviewTitle">Tableau de Révision</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .lang-selector {{
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 100;
+            display: flex;
+            gap: 8px;
+            background: rgba(31, 41, 55, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 8px;
+            border-radius: 12px;
+            border: 1px solid rgba(75, 85, 99, 0.5);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }}
+        .lang-btn {{
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid transparent;
+            background: transparent;
+            color: #9CA3AF;
+        }}
+        .lang-btn:hover {{
+            background: rgba(75, 85, 99, 0.5);
+            color: #E5E7EB;
+        }}
+        .lang-btn.active {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-color: rgba(102, 126, 234, 0.5);
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+        }}
+        .lang-btn .flag {{
+            font-size: 18px;
+            margin-right: 6px;
+        }}
+    </style>
+</head>
+<body class="bg-gray-900 text-white font-sans antialiased">
+    
+    <div class="lang-selector">
+        <button class="lang-btn active" data-lang="fr" onclick="setLanguage('fr')">
+            <span class="flag">🇫🇷</span> FR
+        </button>
+        <button class="lang-btn" data-lang="en" onclick="setLanguage('en')">
+            <span class="flag">🇬🇧</span> EN
+        </button>
+    </div>
+
+    <div class="max-w-7xl mx-auto px-4 py-12">
+        <div class="mb-8">
+            <a href="/" class="text-blue-400 hover:text-blue-300 transition">
+                <span data-i18n="backToDashboard">← Retour au Dashboard</span>
+            </a>
+        </div>
+        
+        <div class="bg-gradient-to-br from-gray-800 to-gray-900 p-8 rounded-3xl border border-gray-700 shadow-2xl">
+            <div class="flex justify-between items-center mb-8">
+                <h1 class="text-4xl font-black bg-gradient-to-r from-yellow-400 to-orange-400 bg-clip-text text-transparent">
+                    🧑‍⚖️ <span data-i18n="reviewTitle">Tableau de Révision</span>
+                </h1>
+                <button onclick="location.reload()" class="px-6 py-2 bg-purple-600 hover:bg-purple-700 rounded-lg font-semibold transition">
+                    🔄 <span data-i18n="reportRefresh">Actualiser</span>
+                </button>
+            </div>
+            
+            <h2 class="text-2xl font-bold mb-6">
+                <span data-i18n="reviewPending">Révisions en Attente</span> ({len(pending)})
+            </h2>
+            
+            <div id="reviews-container" class="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {cards_html if cards_html else '<div class="col-span-2 text-center py-12 text-gray-400"><p data-i18n="reviewNoPending">✅ Aucune révision en attente</p></div>'}
+            </div>
+        </div>
+    </div>
+    
+    <script src="/static/translations.js"></script>
+    <script>
+        async function processReview(reviewId, action) {{
+            try {{
+                const response = await fetch(`/staff/review/${{reviewId}}/${{action}}`, {{
+                    method: 'POST'
+                }});
+                
+                if (response.ok) {{
+                    alert(t('reviewSuccess'));
+                    location.reload();
+                }} else {{
+                    alert(t('reviewError'));
+                }}
+            }} catch (error) {{
+                alert(t('reviewError') + ': ' + error.message);
+            }}
+        }}
+    </script>
+</body>
+</html>
+    """
+    return HTMLResponse(content=html_content)
 
 
 @app.get("/staff/reviews")
