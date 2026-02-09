@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PlexStaffAI Dashboard</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <script src="https://unpkg.com/htmx.org@1.9.10"></script>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
@@ -21,7 +22,6 @@
             animation: bounce 3s ease-in-out infinite;
         }
     </style>
-    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 </head>
 <body class="bg-gray-900 text-white font-sans antialiased">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -34,9 +34,9 @@
                         🚀 PlexStaffAI Admin
                     </h1>
                     <p class="text-xl lg:text-2xl text-gray-400 font-light">
-                        IA Moderation Overseerr • Auto-Scan 1min
+                        IA Moderation Overseerr • Auto-Scan <span id="scan-interval-header">...</span>
                     </p>
-                    <p class="text-sm text-gray-500 mt-2">v1.6.0 • Smart Rules + ML Learning</p>
+                    <p class="text-sm text-gray-500 mt-2">v1.6.0 • OpenAI GPT-4o-mini + Smart Rules</p>
                 </div>
                 
                 <!-- Bouton Review Dashboard -->
@@ -55,7 +55,7 @@
             <div class="text-center">
                 <div class="inline-flex items-center gap-2 bg-emerald-900/30 px-6 py-2 rounded-full border border-emerald-700">
                     <span class="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></span>
-                    <span class="text-emerald-300 font-semibold">Système Live • Cron Actif</span>
+                    <span class="text-emerald-300 font-semibold">⏰ Auto-Scan Actif • Toutes les <span id="scan-interval-badge">...</span></span>
                 </div>
             </div>
         </header>
@@ -87,7 +87,7 @@
             </div>
         </div>
 
-        <!-- ✨ FIX: 3 BOUTONS SUR LA MÊME LIGNE -->
+        <!-- 3 BOUTONS SUR LA MÊME LIGNE -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             <button 
                 hx-get="/moderate-html" 
@@ -97,7 +97,7 @@
                 class="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 
                        px-8 py-5 rounded-2xl font-bold text-xl shadow-2xl transform hover:scale-105 
                        transition-all duration-300 text-white cursor-pointer border-2 border-blue-500/50">
-                🔄 MODÉRER MAINTENANT
+                🚀 MODÉRER MAINTENANT
             </button>
             
             <button 
@@ -107,7 +107,7 @@
                 class="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 
                        px-8 py-5 rounded-2xl font-bold text-xl shadow-2xl transform hover:scale-105 
                        transition-all duration-300 text-white cursor-pointer border-2 border-emerald-500/50">
-                📈 REFRESH STATS
+                🔄 REFRESH STATS
             </button>
 
             <a href="/history"
@@ -121,7 +121,7 @@
         <!-- Loading Indicator -->
         <div class="text-center mb-8">
             <span id="loading" class="htmx-indicator text-blue-400 text-lg font-semibold">
-                ⏳ IA en cours...
+                ⏳ Modération en cours...
             </span>
         </div>
 
@@ -132,8 +132,11 @@
                 <span class="w-3 h-3 bg-yellow-400 rounded-full mr-3 animate-pulse"></span>
                 Résultats Modération IA
             </h3>
-            <div class="text-gray-400 text-lg">
-                👆 Clique <span class="text-blue-400 font-bold">"MODÉRER MAINTENANT"</span> ou attends auto-scan 1min...
+            <div class="text-gray-400 text-lg space-y-3">
+                <p>👆 Clique <span class="text-blue-400 font-bold">"MODÉRER MAINTENANT"</span> pour scanner immédiatement</p>
+                <p class="text-sm text-gray-500">
+                    ⏰ Le système scanne automatiquement toutes les <span id="scan-interval-info" class="text-emerald-400 font-semibold">...</span>
+                </p>
             </div>
         </div>
 
@@ -142,7 +145,7 @@
                     p-8 rounded-3xl border border-purple-800/50 shadow-2xl">
             <h3 class="text-2xl font-bold mb-6 flex items-center text-purple-300">
                 <span class="w-3 h-3 bg-purple-400 rounded-full mr-3 animate-pulse"></span>
-                🎯 API Endpoints
+                🎯 Quick Links
             </h3>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <a href="/docs" target="_blank" 
@@ -152,18 +155,18 @@
                 </a>
                 <a href="/health" target="_blank"
                    class="block p-4 bg-emerald-800/30 rounded-xl hover:bg-emerald-700/50 transition border border-emerald-700">
-                    <div class="font-bold text-emerald-300">💚 Health</div>
+                    <div class="font-bold text-emerald-300">💚 Health Check</div>
                     <div class="text-sm text-emerald-400">/health</div>
                 </a>
-                <a href="/history" target="_blank"
-                   class="block p-4 bg-pink-800/30 rounded-xl hover:bg-pink-700/50 transition border border-pink-700">
-                    <div class="font-bold text-pink-300">📜 Historique</div>
-                    <div class="text-sm text-pink-400">/history</div>
-                </a>
-                <a href="/debug/overseerr" target="_blank"
+                <a href="/staff/report" target="_blank"
                    class="block p-4 bg-blue-800/30 rounded-xl hover:bg-blue-700/50 transition border border-blue-700">
-                    <div class="font-bold text-blue-300">🔍 Debug</div>
-                    <div class="text-sm text-blue-400">/debug/overseerr</div>
+                    <div class="font-bold text-blue-300">📊 Rapport Complet</div>
+                    <div class="text-sm text-blue-400">/staff/report</div>
+                </a>
+                <a href="/staff/openai-stats" target="_blank"
+                   class="block p-4 bg-pink-800/30 rounded-xl hover:bg-pink-700/50 transition border border-pink-700">
+                    <div class="font-bold text-pink-300">🤖 OpenAI Stats</div>
+                    <div class="text-sm text-pink-400">/staff/openai-stats</div>
                 </a>
             </div>
         </div>
@@ -193,7 +196,7 @@
                 </a>
             </div>
             <p class="text-xs text-gray-600 mt-4">
-                OpenAI GPT-4o-mini • FastAPI • HTMX • Cron 1min • Smart Rules + ML
+                OpenAI GPT-4o-mini • FastAPI • HTMX • Auto-Scan • Smart Rules + ML Learning
             </p>
         </footer>
     </div>
@@ -217,16 +220,31 @@
     </a>
 
     <script>
-        // ✨ FIX: Formater les stats en HTML cards
+        // Update scan interval display from stats API
+        function updateScanInterval(scanInterval) {
+            const intervalText = scanInterval === 1 ? '1 minute' : `${scanInterval} minutes`;
+            
+            // Update all scan interval displays
+            document.getElementById('scan-interval-header').textContent = intervalText;
+            document.getElementById('scan-interval-badge').textContent = intervalText;
+            document.getElementById('scan-interval-info').textContent = intervalText;
+        }
+
+        // Format stats as HTML cards
         document.body.addEventListener('htmx:afterSwap', function(evt) {
             if (evt.detail.target.id === 'stats-container') {
                 try {
-                    // Si c'est du JSON, convertir en HTML
                     const container = document.getElementById('stats-container');
                     const content = container.textContent.trim();
                     
                     if (content.startsWith('{')) {
                         const stats = JSON.parse(content);
+                        
+                        // Update scan interval if available
+                        if (stats.scan_interval) {
+                            updateScanInterval(stats.scan_interval);
+                        }
+                        
                         container.innerHTML = `
                             <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
                                 <div class="bg-gradient-to-br from-gray-800 to-gray-900 p-8 rounded-2xl shadow-2xl border border-gray-700">
@@ -277,18 +295,22 @@
                         badge.classList.add('animate-pulse');
                     }
                 })
-                .catch(err => console.log('Pending count not available'));
+                .catch(err => console.log('Pending count endpoint not available yet'));
         }
         
+        // Initial updates
         updatePendingCount();
-        setInterval(updatePendingCount, 30000);
         
-        // HTMX logging
+        // Periodic updates
+        setInterval(updatePendingCount, 30000); // Every 30s
+        
+        // HTMX logging for debugging
         document.body.addEventListener('htmx:afterRequest', function(evt) {
             console.log('HTMX:', evt.detail.pathInfo.requestPath, evt.detail.successful ? '✅' : '❌');
         });
         
-        console.log('✅ PlexStaffAI v1.6.0 loaded');
+        console.log('✅ PlexStaffAI v1.6.0 Dashboard loaded');
+        console.log('⏰ Auto-scan enabled with dynamic interval');
         console.log('HTMX Version:', htmx.version || '❌ Not loaded');
     </script>
 </body>
