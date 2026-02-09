@@ -259,7 +259,7 @@ class FeedbackDatabase:
 
 
 # Intégration dans main.py
-from config_loader import ConfigManager, SmartModerator
+from app.config_loader import ConfigManager, SmartModerator
 
 class EnhancedModerator:
     """Modérateur avec ML feedback integration"""
