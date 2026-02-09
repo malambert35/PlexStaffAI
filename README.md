@@ -6,6 +6,7 @@
 [![Version](https://img.shields.io/badge/version-1.6.0-green.svg)](https://github.com/malambert35/PlexStaffAI/releases)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/)
+[![Built with AI](https://img.shields.io/badge/built_with-Claude_Sonnet-8A2BE2.svg)](https://www.anthropic.com/claude)
 
 # PlexStaffAI
 
