@@ -21,33 +21,89 @@
         .animate-bounce-slow {
             animation: bounce 3s ease-in-out infinite;
         }
+        
+        /* Language selector styles */
+        .lang-selector {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 100;
+            display: flex;
+            gap: 8px;
+            background: rgba(31, 41, 55, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 8px;
+            border-radius: 12px;
+            border: 1px solid rgba(75, 85, 99, 0.5);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+        
+        .lang-btn {
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid transparent;
+            background: transparent;
+            color: #9CA3AF;
+        }
+        
+        .lang-btn:hover {
+            background: rgba(75, 85, 99, 0.5);
+            color: #E5E7EB;
+        }
+        
+        .lang-btn.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-color: rgba(102, 126, 234, 0.5);
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+        }
+        
+        .lang-btn .flag {
+            font-size: 18px;
+            margin-right: 6px;
+        }
     </style>
 </head>
 <body class="bg-gray-900 text-white font-sans antialiased">
+    
+    <!-- Language Selector (Fixed top-right) -->
+    <div class="lang-selector">
+        <button class="lang-btn active" data-lang="fr" onclick="setLanguage('fr')">
+            <span class="flag">🇫🇷</span> FR
+        </button>
+        <button class="lang-btn" data-lang="en" onclick="setLanguage('en')">
+            <span class="flag">🇬🇧</span> EN
+        </button>
+    </div>
+
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         
-        <!-- HEADER avec Review Dashboard -->
+        <!-- HEADER -->
         <header class="mb-16">
             <div class="flex flex-col lg:flex-row justify-between items-center gap-6 mb-8">
                 <div class="text-center lg:text-left">
                     <h1 class="text-5xl lg:text-6xl font-black bg-gradient-to-r from-blue-400 via-purple-500 to-pink-500 bg-clip-text text-transparent mb-4 animate-pulse">
-                        🚀 PlexStaffAI Admin
+                        🚀 <span data-i18n="title">PlexStaffAI Admin</span>
                     </h1>
                     <p class="text-xl lg:text-2xl text-gray-400 font-light">
-                        IA Moderation Overseerr • Auto-Scan <span id="scan-interval-header">...</span>
+                        <span data-i18n="subtitle">IA Moderation Overseerr • Auto-Scan</span> <span id="scan-interval-header">...</span>
                     </p>
-                    <p class="text-sm text-gray-500 mt-2">v1.6.0 • OpenAI GPT-4o-mini + Smart Rules</p>
+                    <p class="text-sm text-gray-500 mt-2">v1.6.0 • <span data-i18n="version">Smart Rules + ML Learning</span></p>
                 </div>
                 
-                <!-- Bouton Review Dashboard -->
+                <!-- Review Dashboard Button -->
                 <a href="/review-dashboard" 
                    class="group bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 
                           px-8 py-4 rounded-2xl font-bold text-xl shadow-2xl transform hover:scale-105 
                           transition-all duration-300 text-black flex items-center gap-3 border-2 border-yellow-400">
                     <span class="text-3xl group-hover:animate-bounce">🧑‍⚖️</span>
                     <div class="text-left">
-                        <div class="text-lg font-bold">Review Dashboard</div>
-                        <div class="text-xs opacity-75">Manage pending reviews</div>
+                        <div class="text-lg font-bold" data-i18n="reviewDashboard">Review Dashboard</div>
+                        <div class="text-xs opacity-75" data-i18n="managePending">Manage pending reviews</div>
                     </div>
                 </a>
             </div>
@@ -55,12 +111,14 @@
             <div class="text-center">
                 <div class="inline-flex items-center gap-2 bg-emerald-900/30 px-6 py-2 rounded-full border border-emerald-700">
                     <span class="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></span>
-                    <span class="text-emerald-300 font-semibold">⏰ Auto-Scan Actif • Toutes les <span id="scan-interval-badge">...</span></span>
+                    <span class="text-emerald-300 font-semibold">
+                        ⏰ <span data-i18n="autoScanActive">Auto-Scan Actif • Toutes les</span> <span id="scan-interval-badge">...</span>
+                    </span>
                 </div>
             </div>
         </header>
         
-        <!-- Stats Cards (Auto-refresh 30s) -->
+        <!-- Stats Cards -->
         <div id="stats-container" 
              hx-get="/stats" 
              hx-trigger="load, every 30s" 
@@ -69,25 +127,25 @@
             <!-- Loading placeholder -->
             <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
                 <div class="bg-gradient-to-br from-gray-800 to-gray-900 p-8 rounded-2xl shadow-2xl border border-gray-700 animate-pulse">
-                    <h3 class="text-lg font-semibold text-gray-400 mb-4">📊 Total</h3>
+                    <h3 class="text-lg font-semibold text-gray-400 mb-4">📊 <span data-i18n="totalDecisions">Total</span></h3>
                     <div class="text-4xl font-black text-gray-600">...</div>
                 </div>
                 <div class="bg-gradient-to-br from-emerald-900 to-teal-900 p-8 rounded-2xl shadow-2xl animate-pulse">
-                    <h3 class="text-lg font-semibold text-gray-300 mb-4">✅ Approuvés</h3>
+                    <h3 class="text-lg font-semibold text-gray-300 mb-4">✅ <span data-i18n="approved">Approuvés</span></h3>
                     <div class="text-4xl font-black text-gray-600">...</div>
                 </div>
                 <div class="bg-gradient-to-br from-red-900 to-pink-900 p-8 rounded-2xl shadow-2xl animate-pulse">
-                    <h3 class="text-lg font-semibold text-gray-300 mb-4">❌ Rejetés</h3>
+                    <h3 class="text-lg font-semibold text-gray-300 mb-4">❌ <span data-i18n="rejected">Rejetés</span></h3>
                     <div class="text-4xl font-black text-gray-600">...</div>
                 </div>
                 <div class="bg-gradient-to-br from-indigo-900 to-purple-900 p-8 rounded-2xl shadow-2xl animate-pulse">
-                    <h3 class="text-lg font-semibold text-gray-300 mb-4">📈 Taux</h3>
+                    <h3 class="text-lg font-semibold text-gray-300 mb-4">📈 <span data-i18n="approvalRate">Taux</span></h3>
                     <div class="text-2xl font-bold text-gray-600">...</div>
                 </div>
             </div>
         </div>
 
-        <!-- 3 BOUTONS SUR LA MÊME LIGNE -->
+        <!-- Action Buttons -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
             <button 
                 hx-get="/moderate-html" 
@@ -97,7 +155,7 @@
                 class="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 
                        px-8 py-5 rounded-2xl font-bold text-xl shadow-2xl transform hover:scale-105 
                        transition-all duration-300 text-white cursor-pointer border-2 border-blue-500/50">
-                🚀 MODÉRER MAINTENANT
+                🚀 <span data-i18n="moderateNow">MODÉRER MAINTENANT</span>
             </button>
             
             <button 
@@ -107,20 +165,20 @@
                 class="bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 
                        px-8 py-5 rounded-2xl font-bold text-xl shadow-2xl transform hover:scale-105 
                        transition-all duration-300 text-white cursor-pointer border-2 border-emerald-500/50">
-                🔄 REFRESH STATS
+                🔄 <span data-i18n="refreshStats">REFRESH STATS</span>
             </button>
 
             <a href="/history"
                class="bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 
                       px-8 py-5 rounded-2xl font-bold text-xl shadow-2xl transform hover:scale-105 
                       transition-all duration-300 text-white text-center border-2 border-purple-500/50 flex items-center justify-center">
-                📜 VOIR HISTORIQUE
+                📜 <span data-i18n="viewHistory">VOIR HISTORIQUE</span>
             </a>
         </div>
 
         <!-- Loading Indicator -->
         <div class="text-center mb-8">
-            <span id="loading" class="htmx-indicator text-blue-400 text-lg font-semibold">
+            <span id="loading" class="htmx-indicator text-blue-400 text-lg font-semibold" data-i18n="loading">
                 ⏳ Modération en cours...
             </span>
         </div>
@@ -130,42 +188,42 @@
              class="bg-gray-800/50 backdrop-blur-xl p-8 rounded-3xl border border-gray-700 mb-8 min-h-[200px] shadow-2xl">
             <h3 class="text-2xl font-bold mb-6 flex items-center">
                 <span class="w-3 h-3 bg-yellow-400 rounded-full mr-3 animate-pulse"></span>
-                Résultats Modération IA
+                <span data-i18n="resultsTitle">Résultats Modération IA</span>
             </h3>
             <div class="text-gray-400 text-lg space-y-3">
-                <p>👆 Clique <span class="text-blue-400 font-bold">"MODÉRER MAINTENANT"</span> pour scanner immédiatement</p>
+                <p>👆 <span data-i18n="resultsDesc">Clique</span> <span class="text-blue-400 font-bold" data-i18n="moderateNow">"MODÉRER MAINTENANT"</span> <span data-i18n="resultsDesc2">pour scanner immédiatement</span></p>
                 <p class="text-sm text-gray-500">
-                    ⏰ Le système scanne automatiquement toutes les <span id="scan-interval-info" class="text-emerald-400 font-semibold">...</span>
+                    ⏰ <span data-i18n="autoScanInfo">Le système scanne automatiquement toutes les</span> <span id="scan-interval-info" class="text-emerald-400 font-semibold">...</span>
                 </p>
             </div>
         </div>
 
-        <!-- API Endpoints -->
+        <!-- Quick Links -->
         <div class="bg-gradient-to-br from-purple-900/80 to-indigo-900/80 backdrop-blur-xl 
                     p-8 rounded-3xl border border-purple-800/50 shadow-2xl">
             <h3 class="text-2xl font-bold mb-6 flex items-center text-purple-300">
                 <span class="w-3 h-3 bg-purple-400 rounded-full mr-3 animate-pulse"></span>
-                🎯 Quick Links
+                🎯 <span data-i18n="quickLinks">Quick Links</span>
             </h3>
             <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <a href="/docs" target="_blank" 
                    class="block p-4 bg-purple-800/30 rounded-xl hover:bg-purple-700/50 transition border border-purple-700">
-                    <div class="font-bold text-purple-300">📖 API Docs</div>
+                    <div class="font-bold text-purple-300">📖 <span data-i18n="apiDocs">API Docs</span></div>
                     <div class="text-sm text-purple-400">/docs (Swagger)</div>
                 </a>
                 <a href="/health" target="_blank"
                    class="block p-4 bg-emerald-800/30 rounded-xl hover:bg-emerald-700/50 transition border border-emerald-700">
-                    <div class="font-bold text-emerald-300">💚 Health Check</div>
+                    <div class="font-bold text-emerald-300">💚 <span data-i18n="healthCheck">Health Check</span></div>
                     <div class="text-sm text-emerald-400">/health</div>
                 </a>
                 <a href="/staff/report" target="_blank"
                    class="block p-4 bg-blue-800/30 rounded-xl hover:bg-blue-700/50 transition border border-blue-700">
-                    <div class="font-bold text-blue-300">📊 Rapport Complet</div>
+                    <div class="font-bold text-blue-300">📊 <span data-i18n="fullReport">Rapport Complet</span></div>
                     <div class="text-sm text-blue-400">/staff/report</div>
                 </a>
                 <a href="/staff/openai-stats" target="_blank"
                    class="block p-4 bg-pink-800/30 rounded-xl hover:bg-pink-700/50 transition border border-pink-700">
-                    <div class="font-bold text-pink-300">🤖 OpenAI Stats</div>
+                    <div class="font-bold text-pink-300">🤖 <span data-i18n="openaiStats">OpenAI Stats</span></div>
                     <div class="text-sm text-pink-400">/staff/openai-stats</div>
                 </a>
             </div>
@@ -174,7 +232,7 @@
         <!-- Footer -->
         <footer class="text-center mt-16 text-gray-500 text-sm space-y-2 pb-8">
             <p class="text-lg">
-                Powered by 
+                <span data-i18n="poweredBy">Powered by</span> 
                 <a href="https://github.com/malambert35/PlexStaffAI" 
                    class="text-blue-400 hover:text-blue-300 font-semibold transition">
                     PlexStaffAI v1.6.0
@@ -182,17 +240,17 @@
             </p>
             <div class="flex justify-center gap-4 text-sm mt-2">
                 <a href="/review-dashboard" class="text-yellow-400 hover:text-yellow-300 transition">
-                    🧑‍⚖️ Review Dashboard
+                    🧑‍⚖️ <span data-i18n="reviewDashboard">Review Dashboard</span>
                 </a>
                 <span class="text-gray-700">•</span>
                 <a href="/staff/report" class="text-blue-400 hover:text-blue-300 transition">
-                    📊 Full Report
+                    📊 <span data-i18n="fullReport">Full Report</span>
                 </a>
                 <span class="text-gray-700">•</span>
                 <a href="https://hub.docker.com/r/malambert35/plexstaffai" 
                    target="_blank"
                    class="text-teal-400 hover:text-teal-300 transition">
-                    🐳 Docker Hub
+                    🐳 <span data-i18n="dockerHub">Docker Hub</span>
                 </a>
             </div>
             <p class="text-xs text-gray-600 mt-4">
@@ -201,7 +259,7 @@
         </footer>
     </div>
 
-    <!-- Badge Flottant Review Dashboard -->
+    <!-- Floating Review Badge -->
     <a href="/review-dashboard" 
        id="review-badge"
        class="fixed bottom-8 right-8 bg-gradient-to-r from-yellow-500 to-orange-500 hover:from-yellow-600 hover:to-orange-600 
@@ -210,8 +268,8 @@
               transform hover:scale-110 animate-bounce-slow border-2 border-yellow-400">
         <span class="text-2xl">🧑‍⚖️</span>
         <div class="hidden sm:block text-left">
-            <div class="text-xs opacity-75 leading-tight">Pending</div>
-            <div class="text-sm font-bold leading-tight">Reviews</div>
+            <div class="text-xs opacity-75 leading-tight" data-i18n="pendingReviews">Pending</div>
+            <div class="text-sm font-bold leading-tight" data-i18n="reviews">Reviews</div>
         </div>
         <span id="pending-count" 
               class="bg-red-500 text-white px-3 py-1 rounded-full text-sm font-black shadow-lg">
@@ -219,12 +277,16 @@
         </span>
     </a>
 
+    <!-- Load translations FIRST -->
+    <script src="/static/translations.js"></script>
+    
     <script>
-        // Update scan interval display from stats API
+        // Update scan interval display
         function updateScanInterval(scanInterval) {
-            const intervalText = scanInterval === 1 ? '1 minute' : `${scanInterval} minutes`;
+            const lang = localStorage.getItem('language') || 'fr';
+            const minuteText = scanInterval === 1 ? t('minute') : t('minutes');
+            const intervalText = `${scanInterval} ${minuteText}`;
             
-            // Update all scan interval displays
             document.getElementById('scan-interval-header').textContent = intervalText;
             document.getElementById('scan-interval-badge').textContent = intervalText;
             document.getElementById('scan-interval-info').textContent = intervalText;
@@ -240,7 +302,6 @@
                     if (content.startsWith('{')) {
                         const stats = JSON.parse(content);
                         
-                        // Update scan interval if available
                         if (stats.scan_interval) {
                             updateScanInterval(stats.scan_interval);
                         }
@@ -248,27 +309,30 @@
                         container.innerHTML = `
                             <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
                                 <div class="bg-gradient-to-br from-gray-800 to-gray-900 p-8 rounded-2xl shadow-2xl border border-gray-700">
-                                    <h3 class="text-lg font-semibold text-gray-400 mb-4">📊 Total</h3>
+                                    <h3 class="text-lg font-semibold text-gray-400 mb-4">📊 <span data-i18n="totalDecisions">${t('totalDecisions')}</span></h3>
                                     <div class="text-5xl font-black text-white">${stats.total_decisions || 0}</div>
-                                    <div class="text-sm text-gray-500 mt-2">Décisions totales</div>
+                                    <div class="text-sm text-gray-500 mt-2" data-i18n="totalDecisionsDesc">${t('totalDecisionsDesc')}</div>
                                 </div>
                                 <div class="bg-gradient-to-br from-emerald-900 to-teal-900 p-8 rounded-2xl shadow-2xl">
-                                    <h3 class="text-lg font-semibold text-gray-300 mb-4">✅ Approuvés</h3>
+                                    <h3 class="text-lg font-semibold text-gray-300 mb-4">✅ <span data-i18n="approved">${t('approved')}</span></h3>
                                     <div class="text-5xl font-black text-emerald-300">${stats.approved || 0}</div>
-                                    <div class="text-sm text-emerald-600 mt-2">Requests validées</div>
+                                    <div class="text-sm text-emerald-600 mt-2" data-i18n="approvedDesc">${t('approvedDesc')}</div>
                                 </div>
                                 <div class="bg-gradient-to-br from-red-900 to-pink-900 p-8 rounded-2xl shadow-2xl">
-                                    <h3 class="text-lg font-semibold text-gray-300 mb-4">❌ Rejetés</h3>
+                                    <h3 class="text-lg font-semibold text-gray-300 mb-4">❌ <span data-i18n="rejected">${t('rejected')}</span></h3>
                                     <div class="text-5xl font-black text-red-300">${stats.rejected || 0}</div>
-                                    <div class="text-sm text-red-600 mt-2">Requests refusées</div>
+                                    <div class="text-sm text-red-600 mt-2" data-i18n="rejectedDesc">${t('rejectedDesc')}</div>
                                 </div>
                                 <div class="bg-gradient-to-br from-indigo-900 to-purple-900 p-8 rounded-2xl shadow-2xl">
-                                    <h3 class="text-lg font-semibold text-gray-300 mb-4">📈 Taux</h3>
+                                    <h3 class="text-lg font-semibold text-gray-300 mb-4">📈 <span data-i18n="approvalRate">${t('approvalRate')}</span></h3>
                                     <div class="text-4xl font-black text-purple-300">${stats.approval_rate || 0}%</div>
-                                    <div class="text-sm text-purple-600 mt-2">Taux d'approbation</div>
+                                    <div class="text-sm text-purple-600 mt-2" data-i18n="approvalRateDesc">${t('approvalRateDesc')}</div>
                                 </div>
                             </div>
                         `;
+                        
+                        // Update translations after stats refresh
+                        updatePageLanguage();
                     }
                 } catch(e) {
                     console.log('Stats already in HTML format');
@@ -302,15 +366,15 @@
         updatePendingCount();
         
         // Periodic updates
-        setInterval(updatePendingCount, 30000); // Every 30s
+        setInterval(updatePendingCount, 30000);
         
-        // HTMX logging for debugging
+        // HTMX logging
         document.body.addEventListener('htmx:afterRequest', function(evt) {
             console.log('HTMX:', evt.detail.pathInfo.requestPath, evt.detail.successful ? '✅' : '❌');
         });
         
         console.log('✅ PlexStaffAI v1.6.0 Dashboard loaded');
-        console.log('⏰ Auto-scan enabled with dynamic interval');
+        console.log('🌍 Language system active');
         console.log('HTMX Version:', htmx.version || '❌ Not loaded');
     </script>
 </body>
