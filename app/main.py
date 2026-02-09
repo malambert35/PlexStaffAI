@@ -9,8 +9,8 @@ from pathlib import Path
 import json
 
 # ✨ NOUVEAUX IMPORTS v1.6
-from config_loader import ConfigManager, SmartModerator, ModerationDecision
-from ml_feedback import FeedbackDatabase, EnhancedModerator
+from app.config_loader import ConfigManager, SmartModerator, ModerationDecision
+from app.ml_feedback import FeedbackDatabase, EnhancedModerator
 
 app = FastAPI(title="PlexStaffAI", version="1.6.0")
 
