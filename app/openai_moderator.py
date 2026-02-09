@@ -1,4 +1,4 @@
-import openai
+from openai import OpenAI
 import os
 import json
 from typing import Dict
@@ -9,10 +9,12 @@ class OpenAIModerator:
     def __init__(self):
         self.api_key = os.getenv("OPENAI_API_KEY")
         if self.api_key:
-            openai.api_key = self.api_key
+            self.client = OpenAI(api_key=self.api_key)
+        else:
+            self.client = None
         
         self.model = "gpt-4o-mini"
-        self.temperature = 0.3  # Un peu plus haut pour raisonnement naturel
+        self.temperature = 0.3
         self.max_tokens = 300
     
     def moderate(self, request_data: Dict) -> Dict:
@@ -29,7 +31,7 @@ class OpenAIModerator:
                 'value_score': float
             }
         """
-        if not self.api_key:
+        if not self.client:
             return {
                 'decision': 'NEEDS_REVIEW',
                 'confidence': 0.0,
@@ -133,28 +135,24 @@ Analyze this request deeply and provide:
 
 Think step-by-step about quality, storage impact, user trust, and appropriateness."""
 
-            # Appel OpenAI
+            # ✨ Appel OpenAI avec nouvelle API
             print(f"\n🤖 {'='*60}")
             print(f"🤖 CONSULTING OPENAI GPT-4o-mini...")
             print(f"🤖 {'='*60}")
             
-            response = openai.ChatCompletion.create(
+            response = self.client.chat.completions.create(
                 model=self.model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt}
                 ],
                 temperature=self.temperature,
-                max_tokens=self.max_tokens
+                max_tokens=self.max_tokens,
+                response_format={"type": "json_object"}  # Force JSON response
             )
             
-            # Parse réponse
+            # Parse réponse (nouvelle syntaxe)
             content = response.choices[0].message.content.strip()
-            
-            # Nettoie markdown
-            if content.startswith('```'):
-                lines = content.split('\n')
-                content = '\n'.join(lines[1:-1]) if len(lines) > 2 else content
             
             result = json.loads(content)
             
@@ -202,7 +200,7 @@ Think step-by-step about quality, storage impact, user trust, and appropriatenes
             
         except json.JSONDecodeError as e:
             print(f"❌ OpenAI JSON parse error: {e}")
-            print(f"Raw response: {content}")
+            print(f"Raw response: {content if 'content' in locals() else 'N/A'}")
             return {
                 'decision': 'NEEDS_REVIEW',
                 'confidence': 0.0,
