@@ -265,6 +265,37 @@ async def manual_moderate():
         "results": results
     }
 
+@app.get("/stats")
+async def stats():
+    """Stats endpoint for dashboard (compatibility with v1.5)"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Total stats
+    cursor.execute("SELECT decision, COUNT(*) FROM decisions GROUP BY decision")
+    stats = dict(cursor.fetchall())
+    
+    # Last 24h
+    yesterday = (datetime.now() - timedelta(days=1)).isoformat()
+    cursor.execute(
+        "SELECT decision, COUNT(*) FROM decisions WHERE timestamp > ? GROUP BY decision",
+        (yesterday,)
+    )
+    last_24h = dict(cursor.fetchall())
+    
+    conn.close()
+    
+    total = sum(stats.values())
+    approved = stats.get('APPROVED', 0)
+    
+    return {
+        "total_decisions": total,
+        "approved": approved,
+        "rejected": stats.get('REJECTED', 0),
+        "needs_review": stats.get('NEEDS_REVIEW', 0),
+        "approval_rate": round(approved / total * 100, 1) if total > 0 else 0,
+        "last_24h": last_24h
+    }
 
 @app.get("/staff/report")
 async def moderation_report():
