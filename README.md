@@ -1,47 +1,45 @@
-# PlexStaffAI
+# 🤖 PlexStaffAI
 
-![Version](https://img.shields.io/badge/stable-v1.5.0-blue?style=for-the-badge)
-![Dev](https://img.shields.io/badge/dev-v1.6.0--beta-orange?style=for-the-badge)
-![Docker](https://img.shields.io/docker/pulls/malambert35/plexstaffai?style=for-the-badge)
-![License](https://img.shields.io/badge/license-MIT-green?style=for-the-badge)
+**Intelligent AI-powered content moderation system for Overseerr/Plex with OpenAI GPT-4o-mini**
 
-**AI-Powered Content Moderation for Overseerr/Jellyseerr**
-
-PlexStaffAI automatically moderates media requests using OpenAI's GPT models, reducing manual review workload while maintaining quality control through customizable rules and machine learning.
+[![Docker](https://img.shields.io/badge/docker-latest-blue.svg)](https://hub.docker.com/r/malambert35/plexstaffai)
+[![Version](https://img.shields.io/badge/version-1.6.0-green.svg)](https://github.com/malambert35/PlexStaffAI/releases)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/)
 
 ---
 
-## 🆕 What's New in v1.6 (Beta)
+## 🎯 Overview
 
-### 🎯 Smart Configuration Rules
-- **YAML-based customization** - Edit moderation rules without code changes
-- **Auto-approve criteria** - High ratings, award-winning content, approved genres
-- **Auto-reject filters** - Low ratings, banned genres, spam keywords
-- **User trust levels** - Different rules for new/trusted/veteran users
+PlexStaffAI is an **AI-first moderation system** that automatically evaluates Overseerr media requests using OpenAI's GPT-4o-mini with a sophisticated rules validation layer. It combines artificial intelligence reasoning with configurable rules to make intelligent decisions about content approval.
 
-### 🧑‍⚖️ Human Review System
-- **NEEDS_REVIEW status** - Flag content requiring staff approval
-- **Dedicated review dashboard** - Clean interface for pending decisions
-- **Smart triggers** - Long series (100+ episodes), new users + obscure content
-- **Manual override** - Staff can approve/reject with custom reasons
+### ✨ Key Features
 
-### 🧠 Machine Learning Feedback Loop
-- **Learn from decisions** - Records all human approvals/rejections
-- **Pattern recognition** - Auto-moderates similar content after 100+ feedbacks
-- **Cost optimization** - Reduces OpenAI API calls over time
-- **Confidence scoring** - Transparency on decision certainty
-
-### 📊 Enhanced Analytics
-- **Rule matching tracking** - See which rules triggered decisions
-- **ML accuracy metrics** - Monitor learning performance
-- **Per-user statistics** - Track user request patterns
-- **Decision confidence** - Know when AI is uncertain
+- 🤖 **OpenAI GPT-4o-mini** primary moderation with deep reasoning
+- 🎯 **Rules Validation Layer** that can override or adjust AI decisions
+- 📊 **TMDB Enrichment** for complete metadata when Overseerr data is incomplete
+- 🧠 **Machine Learning** that improves from staff feedback
+- 📈 **Advanced Analytics** with confidence scores and risk assessment
+- 🎨 **Beautiful Dashboard** with real-time statistics
+- 🧑‍⚖️ **Review Queue** for edge cases requiring human judgment
+- 💾 **Complete History** with full request metadata
 
 ---
 
 ## 🚀 Quick Start
 
-### Production (Stable)
+### Prerequisites
+
+- Docker & Docker Compose
+- OpenAI API Key (required) - [Get one here](https://platform.openai.com/api-keys)
+- Overseerr instance with API access
+- TMDB API Key (optional but recommended) - [Get one here](https://www.themoviedb.org/settings/api)
+
+### Installation
+
+#### Option 1: Docker Compose (Recommended)
+
+**1. Create `docker-compose.yml`:**
 
 ```yaml
 version: '3.8'
@@ -50,13 +48,13 @@ services:
   plexstaffai:
     image: malambert35/plexstaffai:latest
     container_name: plexstaffai
-    environment:
-      - OPENAI_API_KEY=sk-your-key-here
-      - OVERSEERR_API_URL=http://overseerr:5055
-      - OVERSEERR_API_KEY=your-overseerr-key
-      - TZ=America/Montreal
-    volumes:
-      - /path/to/appdata/plexstaffai:/config
+    restart: unless-stopped
     ports:
       - "5056:5056"
-    restart: unless-stopped
+    volumes:
+      - ./config:/config
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OVERSEERR_API_URL=${OVERSEERR_API_URL}
+      - OVERSEERR_API_KEY=${OVERSEERR_API_KEY}
+      - TMDB_API_KEY=${TMDB_API_KEY}
