@@ -589,9 +589,9 @@ async def stats():
         "last_24h": last_24h
     }
 
-@app.get("/staff/report")
+@app.get("/staff/report", response_class=HTMLResponse)
 async def moderation_report():
-    """Get moderation statistics"""
+    """Get moderation statistics with beautiful HTML view"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
@@ -607,19 +607,242 @@ async def moderation_report():
     )
     last_24h = dict(cursor.fetchall())
     
+    # Last 7 days
+    week_ago = (datetime.now() - timedelta(days=7)).isoformat()
+    cursor.execute(
+        "SELECT decision, COUNT(*) FROM decisions WHERE timestamp > ? GROUP BY decision",
+        (week_ago,)
+    )
+    last_7d = dict(cursor.fetchall())
+    
+    # Recent decisions
+    cursor.execute("""
+        SELECT request_id, decision, reason, rule_matched, timestamp 
+        FROM decisions 
+        ORDER BY timestamp DESC 
+        LIMIT 10
+    """)
+    recent = cursor.fetchall()
+    
+    # Rules breakdown
+    cursor.execute("""
+        SELECT rule_matched, COUNT(*) as count 
+        FROM decisions 
+        GROUP BY rule_matched 
+        ORDER BY count DESC 
+        LIMIT 10
+    """)
+    rules_stats = cursor.fetchall()
+    
     conn.close()
     
+    # Calculate totals
     total = sum(stats.values())
     approved = stats.get('APPROVED', 0)
+    rejected = stats.get('REJECTED', 0)
+    needs_review = stats.get('NEEDS_REVIEW', 0)
+    approval_rate = round(approved / total * 100, 1) if total > 0 else 0
     
-    return {
-        "total_decisions": total,
-        "approved": approved,
-        "rejected": stats.get('REJECTED', 0),
-        "needs_review": stats.get('NEEDS_REVIEW', 0),
-        "approval_rate": round(approved / total * 100, 1) if total > 0 else 0,
-        "last_24h": last_24h
-    }
+    total_24h = sum(last_24h.values())
+    total_7d = sum(last_7d.values())
+    
+    # Génère HTML
+    html = f'''
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Rapport Complet - PlexStaffAI</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes fadeIn {{
+            from {{ opacity: 0; transform: translateY(20px); }}
+            to {{ opacity: 1; transform: translateY(0); }}
+        }}
+        .fade-in {{ animation: fadeIn 0.5s ease-out; }}
+    </style>
+</head>
+<body class="bg-gray-900 text-white font-sans antialiased">
+    <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+        
+        <!-- Header -->
+        <header class="mb-12 fade-in">
+            <div class="flex items-center justify-between mb-6">
+                <div>
+                    <h1 class="text-5xl font-black bg-gradient-to-r from-blue-400 via-purple-500 to-pink-500 bg-clip-text text-transparent mb-2">
+                        📊 Rapport de Modération Complet
+                    </h1>
+                    <p class="text-xl text-gray-400">Vue d'ensemble des statistiques PlexStaffAI</p>
+                </div>
+                <a href="/" 
+                   class="bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 
+                          px-6 py-3 rounded-xl font-bold text-lg transition shadow-lg">
+                    🏠 Dashboard
+                </a>
+            </div>
+        </header>
+
+        <!-- Overall Stats -->
+        <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8 fade-in">
+            <div class="bg-gradient-to-br from-gray-800 to-gray-900 p-8 rounded-2xl shadow-2xl border border-gray-700">
+                <div class="text-gray-400 text-sm font-semibold mb-2">📊 TOTAL DÉCISIONS</div>
+                <div class="text-6xl font-black text-white mb-2">{total}</div>
+                <div class="text-sm text-gray-500">Toutes périodes</div>
+            </div>
+            
+            <div class="bg-gradient-to-br from-emerald-900 to-teal-900 p-8 rounded-2xl shadow-2xl border border-emerald-700">
+                <div class="text-emerald-300 text-sm font-semibold mb-2">✅ APPROUVÉS</div>
+                <div class="text-6xl font-black text-emerald-300 mb-2">{approved}</div>
+                <div class="text-sm text-emerald-600">{round(approved/total*100, 1) if total > 0 else 0}% du total</div>
+            </div>
+            
+            <div class="bg-gradient-to-br from-red-900 to-pink-900 p-8 rounded-2xl shadow-2xl border border-red-700">
+                <div class="text-red-300 text-sm font-semibold mb-2">❌ REJETÉS</div>
+                <div class="text-6xl font-black text-red-300 mb-2">{rejected}</div>
+                <div class="text-sm text-red-600">{round(rejected/total*100, 1) if total > 0 else 0}% du total</div>
+            </div>
+            
+            <div class="bg-gradient-to-br from-yellow-900 to-orange-900 p-8 rounded-2xl shadow-2xl border border-yellow-700">
+                <div class="text-yellow-300 text-sm font-semibold mb-2">🧑‍⚖️ EN REVIEW</div>
+                <div class="text-6xl font-black text-yellow-300 mb-2">{needs_review}</div>
+                <div class="text-sm text-yellow-600">{round(needs_review/total*100, 1) if total > 0 else 0}% du total</div>
+            </div>
+        </div>
+
+        <!-- Time Period Stats -->
+        <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8 fade-in">
+            <div class="bg-gray-800/50 backdrop-blur-xl p-6 rounded-xl border border-gray-700">
+                <h3 class="text-xl font-bold mb-4 text-purple-400">📈 Taux d'Approbation</h3>
+                <div class="text-5xl font-black text-white mb-2">{approval_rate}%</div>
+                <div class="text-sm text-gray-400">Pourcentage global</div>
+            </div>
+            
+            <div class="bg-gray-800/50 backdrop-blur-xl p-6 rounded-xl border border-gray-700">
+                <h3 class="text-xl font-bold mb-4 text-blue-400">📅 Dernières 24h</h3>
+                <div class="text-5xl font-black text-white mb-2">{total_24h}</div>
+                <div class="text-sm text-gray-400">
+                    <span class="text-emerald-400">{last_24h.get('APPROVED', 0)} ✅</span> • 
+                    <span class="text-red-400">{last_24h.get('REJECTED', 0)} ❌</span> • 
+                    <span class="text-yellow-400">{last_24h.get('NEEDS_REVIEW', 0)} 🧑‍⚖️</span>
+                </div>
+            </div>
+            
+            <div class="bg-gray-800/50 backdrop-blur-xl p-6 rounded-xl border border-gray-700">
+                <h3 class="text-xl font-bold mb-4 text-indigo-400">📆 Derniers 7 jours</h3>
+                <div class="text-5xl font-black text-white mb-2">{total_7d}</div>
+                <div class="text-sm text-gray-400">
+                    <span class="text-emerald-400">{last_7d.get('APPROVED', 0)} ✅</span> • 
+                    <span class="text-red-400">{last_7d.get('REJECTED', 0)} ❌</span> • 
+                    <span class="text-yellow-400">{last_7d.get('NEEDS_REVIEW', 0)} 🧑‍⚖️</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Rules Breakdown -->
+        <div class="bg-gray-800/50 backdrop-blur-xl p-6 rounded-xl border border-gray-700 mb-8 fade-in">
+            <h3 class="text-2xl font-bold mb-6 flex items-center">
+                <span class="w-3 h-3 bg-purple-400 rounded-full mr-3 animate-pulse"></span>
+                🎯 Règles les Plus Utilisées
+            </h3>
+            <div class="space-y-3">
+    '''
+    
+    for rule, count in rules_stats:
+        percentage = round(count / total * 100, 1) if total > 0 else 0
+        html += f'''
+                <div class="bg-gray-900/50 p-4 rounded-lg">
+                    <div class="flex justify-between items-center mb-2">
+                        <div class="font-mono text-sm text-purple-300">{rule}</div>
+                        <div class="text-white font-bold">{count} fois ({percentage}%)</div>
+                    </div>
+                    <div class="w-full bg-gray-700 rounded-full h-2">
+                        <div class="bg-gradient-to-r from-purple-500 to-pink-500 h-2 rounded-full" 
+                             style="width: {percentage}%"></div>
+                    </div>
+                </div>
+        '''
+    
+    html += '''
+            </div>
+        </div>
+
+        <!-- Recent Decisions -->
+        <div class="bg-gray-800/50 backdrop-blur-xl p-6 rounded-xl border border-gray-700 fade-in">
+            <h3 class="text-2xl font-bold mb-6 flex items-center">
+                <span class="w-3 h-3 bg-blue-400 rounded-full mr-3 animate-pulse"></span>
+                🕐 10 Dernières Décisions
+            </h3>
+            <div class="space-y-3">
+    '''
+    
+    for req_id, decision, reason, rule, timestamp in recent:
+        if decision == 'APPROVED':
+            color = 'bg-emerald-900/30 border-emerald-700'
+            text_color = 'text-emerald-300'
+            emoji = '✅'
+        elif decision == 'REJECTED':
+            color = 'bg-red-900/30 border-red-700'
+            text_color = 'text-red-300'
+            emoji = '❌'
+        else:
+            color = 'bg-yellow-900/30 border-yellow-700'
+            text_color = 'text-yellow-300'
+            emoji = '🧑‍⚖️'
+        
+        html += f'''
+                <div class="{color} border rounded-lg p-4">
+                    <div class="flex justify-between items-start mb-2">
+                        <div class="flex items-center gap-2">
+                            <span class="text-2xl">{emoji}</span>
+                            <div>
+                                <span class="font-bold text-white">Request #{req_id}</span>
+                                <span class="text-xs {text_color} ml-2">{decision}</span>
+                            </div>
+                        </div>
+                        <div class="text-xs text-gray-500">{timestamp}</div>
+                    </div>
+                    <div class="text-sm {text_color} opacity-90 mb-1">{reason}</div>
+                    <div class="text-xs text-gray-500">Règle: {rule}</div>
+                </div>
+        '''
+    
+    html += '''
+            </div>
+        </div>
+
+        <!-- Quick Actions -->
+        <div class="mt-8 flex gap-4 justify-center flex-wrap fade-in">
+            <a href="/" 
+               class="bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded-xl font-bold transition shadow-lg">
+                🏠 Dashboard Principal
+            </a>
+            <a href="/history" 
+               class="bg-purple-600 hover:bg-purple-700 px-6 py-3 rounded-xl font-bold transition shadow-lg">
+                📜 Historique Complet
+            </a>
+            <a href="/review-dashboard" 
+               class="bg-yellow-600 hover:bg-yellow-700 px-6 py-3 rounded-xl font-bold transition shadow-lg">
+                🧑‍⚖️ Review Dashboard
+            </a>
+            <button 
+               onclick="window.location.reload()" 
+               class="bg-emerald-600 hover:bg-emerald-700 px-6 py-3 rounded-xl font-bold transition shadow-lg">
+                🔄 Rafraîchir
+            </button>
+        </div>
+
+        <!-- Footer -->
+        <footer class="text-center mt-12 text-gray-500 text-sm">
+            <p>PlexStaffAI v1.6.0 • Rapport généré le {datetime.now().strftime("%d/%m/%Y à %H:%M")}</p>
+        </footer>
+
+    </div>
+</body>
+</html>
+    '''
+    
+    return HTMLResponse(content=html)
 
 
 @app.get("/history", response_class=HTMLResponse)
