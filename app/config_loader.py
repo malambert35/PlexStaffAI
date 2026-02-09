@@ -17,7 +17,9 @@ class ConfigManager:
         try:
             if self.config_path.exists():
                 with open(self.config_path, 'r') as f:
-                    return yaml.safe_load(f)
+                    config = yaml.safe_load(f)
+                    print(f"✅ Config loaded from {self.config_path}")  # ← AJOUTÉ
+                    return config
             else:
                 print(f"⚠️  Config not found at {self.config_path}, using defaults")
                 return self.get_default_config()
