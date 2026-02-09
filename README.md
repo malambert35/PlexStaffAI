@@ -9,11 +9,11 @@
 
 # PlexStaffAI
 
-![Version](https://img.shields.io/badge/stable-v1.5.0-blue?style=for-the-badge)
+![Version](https://img.shields.io/badge/stable-v1.6.0-blue?style=for-the-badge)
 ![Beta](https://img.shields.io/badge/v1.6.0--beta-orange?style=for-the-badge)
 ![Docker](https://img.shields.io/docker/pulls/malambert35/plexstaffai?style=for-the-badge)
 
-**🧪 Beta v1.6 Available:** Smart Rules + ML Feedback System → [Release Notes](https://github.com/malambert35/PlexStaffAI/releases/tag/v1.6.0-beta)
+**🧪 v1.6 Available:** Smart Rules + ML Feedback System
 
 ### ✨ Key Features
 

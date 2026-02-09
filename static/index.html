@@ -21,6 +21,7 @@
             animation: bounce 3s ease-in-out infinite;
         }
     </style>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
 </head>
 <body class="bg-gray-900 text-white font-sans antialiased">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
@@ -33,9 +34,9 @@
                         🚀 PlexStaffAI Admin
                     </h1>
                     <p class="text-xl lg:text-2xl text-gray-400 font-light">
-                        IA Moderation Overseerr • Auto-Scan 15min
+                        IA Moderation Overseerr • Auto-Scan 1min
                     </p>
-                    <p class="text-sm text-gray-500 mt-2">v1.6.0-dev • Smart Rules + ML Learning</p>
+                    <p class="text-sm text-gray-500 mt-2">v1.6.0 • Smart Rules + ML Learning</p>
                 </div>
                 
                 <!-- Bouton Review Dashboard -->
@@ -132,7 +133,7 @@
                 Résultats Modération IA
             </h3>
             <div class="text-gray-400 text-lg">
-                👆 Clique <span class="text-blue-400 font-bold">"MODÉRER MAINTENANT"</span> ou attends auto-scan 15min...
+                👆 Clique <span class="text-blue-400 font-bold">"MODÉRER MAINTENANT"</span> ou attends auto-scan 1min...
             </div>
         </div>
 
@@ -173,7 +174,7 @@
                 Powered by 
                 <a href="https://github.com/malambert35/PlexStaffAI" 
                    class="text-blue-400 hover:text-blue-300 font-semibold transition">
-                    PlexStaffAI v1.6.0-dev
+                    PlexStaffAI v1.6.0
                 </a>
             </p>
             <div class="flex justify-center gap-4 text-sm mt-2">
@@ -192,7 +193,7 @@
                 </a>
             </div>
             <p class="text-xs text-gray-600 mt-4">
-                OpenAI GPT-4o-mini • FastAPI • HTMX • Cron 15min • Smart Rules + ML
+                OpenAI GPT-4o-mini • FastAPI • HTMX • Cron 1min • Smart Rules + ML
             </p>
         </footer>
     </div>
@@ -287,7 +288,7 @@
             console.log('HTMX:', evt.detail.pathInfo.requestPath, evt.detail.successful ? '✅' : '❌');
         });
         
-        console.log('✅ PlexStaffAI v1.6.0-dev loaded');
+        console.log('✅ PlexStaffAI v1.6.0 loaded');
         console.log('HTMX Version:', htmx.version || '❌ Not loaded');
     </script>
 </body>

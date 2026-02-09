@@ -545,7 +545,7 @@ async def moderate_html():
     </div>
     
     <div class="text-center text-gray-500 text-sm mt-4">
-        ⏱️ Modération terminée • Prochaine auto-scan dans 15min
+        ⏱️ Modération terminée • Prochaine auto-scan dans 1min
     </div>
 </div>
 '''
