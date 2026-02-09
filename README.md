@@ -7,11 +7,13 @@
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Python](https://img.shields.io/badge/python-3.11-blue.svg)](https://www.python.org/)
 
----
+# PlexStaffAI
 
-## 🎯 Overview
+![Version](https://img.shields.io/badge/stable-v1.5.0-blue?style=for-the-badge)
+![Beta](https://img.shields.io/badge/v1.6.0--beta-orange?style=for-the-badge)
+![Docker](https://img.shields.io/docker/pulls/malambert35/plexstaffai?style=for-the-badge)
 
-PlexStaffAI is an **AI-first moderation system** that automatically evaluates Overseerr media requests using OpenAI's GPT-4o-mini with a sophisticated rules validation layer. It combines artificial intelligence reasoning with configurable rules to make intelligent decisions about content approval.
+**🧪 Beta v1.6 Available:** Smart Rules + ML Feedback System → [Release Notes](https://github.com/malambert35/PlexStaffAI/releases/tag/v1.6.0-beta)
 
 ### ✨ Key Features
 

@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  # ========================================
+  # ✅ PRODUCTION v1.5 (port 5056)
+  # ========================================
+  plexstaffai:
+    image: malambert35/plexstaffai:latest
+    container_name: plexstaffai
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OVERSEERR_API_URL=${OVERSEERR_API_URL:-http://overseerr:5055}
+      - OVERSEERR_API_KEY=${OVERSEERR_API_KEY}
+      - TZ=America/Montreal
+    volumes:
+      - /mnt/user/appdata/plexstaffai:/config
+    ports:
+      - 5056:5056
+    restart: unless-stopped
+
+  # ========================================
+  # 🧪 DEVELOPMENT v1.6 (port 5057)
+  # ========================================
+  plexstaffai-dev:
+    image: malambert35/plexstaffai:dev
+    container_name: plexstaffai-dev
+    environment:
+      - OPENAI_API_KEY=${OPENAI_API_KEY}
+      - OVERSEERR_API_URL=${OVERSEERR_API_URL:-http://overseerr:5055}
+      - OVERSEERR_API_KEY=${OVERSEERR_API_KEY}
+      - TZ=America/Montreal
+    volumes:
+      - /mnt/user/appdata/plexstaffai-dev:/config
+    ports:
+      - 5057:5056
+    restart: unless-stopped
