@@ -4,6 +4,7 @@ services:
     build: .
     container_name: plexstaffai
     environment:
+      - SCAN_INTERVAL_MINUTES=1 
       - OPENAI_API_KEY=${OPENAI_API_KEY}
       - OVERSEERR_API_URL=${OVERSEERR_API_URL}
       - OVERSEERR_API_KEY=${OVERSEERR_API_KEY}
