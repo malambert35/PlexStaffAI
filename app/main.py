@@ -18,6 +18,7 @@ app = FastAPI(title="PlexStaffAI", version="1.6.0")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OVERSEERR_API_URL = os.getenv("OVERSEERR_API_URL", "http://overseerr:5055")
 OVERSEERR_API_KEY = os.getenv("OVERSEERR_API_KEY")
+TMDB_API_KEY = os.getenv("TMDB_API_KEY", "")  # ✨ NOUVEAU: Enrichissement TMDB
 
 # ✨ NOUVEAU: Charger config personnalisée + ML
 config = ConfigManager("/config/config.yaml")
@@ -83,6 +84,7 @@ async def health_check():
         "version": "1.6.0",
         "openai": "configured" if OPENAI_API_KEY else "missing",
         "overseerr": "configured" if OVERSEERR_API_URL else "missing",
+        "tmdb": "configured" if TMDB_API_KEY else "missing",
         "ml_enabled": config.get("machine_learning.enabled", True)
     }
 
@@ -133,14 +135,60 @@ def decline_overseerr_request(request_id: int):
         return False
 
 
-def get_title_from_media(media: dict) -> str:
+# ✨ NOUVEAU: Enrichissement TMDB
+def enrich_from_tmdb(tmdb_id: int, media_type: str) -> dict:
+    """Enrichit les données depuis TMDB API si disponible"""
+    if not TMDB_API_KEY:
+        print("⚠️  TMDB_API_KEY not configured, skipping enrichment")
+        return {}
+    
+    try:
+        # Endpoint TMDB selon type
+        endpoint = f"https://api.themoviedb.org/3/{media_type}/{tmdb_id}"
+        
+        response = httpx.get(
+            endpoint,
+            params={"api_key": TMDB_API_KEY, "language": "fr-FR"},
+            timeout=5.0
+        )
+        response.raise_for_status()
+        data = response.json()
+        
+        print(f"✅ TMDB enrichment successful for {media_type}/{tmdb_id}")
+        
+        return {
+            'title': data.get('name') or data.get('title', ''),
+            'original_title': data.get('original_name') or data.get('original_title', ''),
+            'overview': data.get('overview', ''),
+            'rating': data.get('vote_average', 0),
+            'popularity': data.get('popularity', 0),
+            'year': (data.get('first_air_date') or data.get('release_date', ''))[:4],
+            'genres': [g.get('name', '') for g in data.get('genres', [])],
+            'episode_count': data.get('number_of_episodes', 0),
+            'season_count': data.get('number_of_seasons', 0),
+            'seasons': data.get('seasons', []),
+            'status': data.get('status', ''),
+        }
+    except Exception as e:
+        print(f"❌ TMDB enrichment failed: {e}")
+        return {}
+
+
+def get_title_from_media(media: dict, tmdb_enriched: dict = None) -> str:
     """Extrait le titre avec fallback robuste"""
     candidates = [
         media.get('title'),
         media.get('name'),
         media.get('originalTitle'),
-        media.get('originalName')
+        media.get('originalName'),
     ]
+    
+    # Ajoute les données TMDB si disponibles
+    if tmdb_enriched:
+        candidates.extend([
+            tmdb_enriched.get('title'),
+            tmdb_enriched.get('original_title')
+        ])
     
     # Retourne le premier non-vide
     for candidate in candidates:
@@ -156,41 +204,71 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
     
     # Extract metadata from Overseerr
     media = request_data.get('media', {})
-    title = get_title_from_media(media)
-    
     media_type = media.get('mediaType', 'unknown')
-    year = media.get('releaseDate', '')[:4] if media.get('releaseDate') else ''
+    tmdb_id = media.get('tmdbId')
+    
+    # ✨ ENRICHISSEMENT TMDB si données manquantes
+    tmdb_enriched = {}
+    needs_enrichment = (
+        not media.get('title') and 
+        not media.get('name') and 
+        tmdb_id and 
+        media_type in ['movie', 'tv']
+    )
+    
+    if needs_enrichment:
+        print(f"🔍 Overseerr data incomplete, enriching from TMDB...")
+        tmdb_enriched = enrich_from_tmdb(tmdb_id, media_type)
+    
+    # Extraction avec fallback TMDB
+    title = get_title_from_media(media, tmdb_enriched)
+    year = tmdb_enriched.get('year') or (media.get('releaseDate', '')[:4] if media.get('releaseDate') else '')
     requested_by = request_data.get('requestedBy', {}).get('displayName', 'unknown')
     user_id = str(request_data.get('requestedBy', {}).get('id', 'unknown'))
     
-    # ✨ EXTRACTION ROBUSTE DES COUNTS
+    # ✨ EXTRACTION ROBUSTE DES COUNTS avec données TMDB
     # Méthode 1: Depuis seasons[] (liste détaillée)
-    seasons = media.get('seasons', [])
-    episode_count_from_seasons = sum(s.get('episodeCount', 0) for s in seasons)
+    seasons = tmdb_enriched.get('seasons') or media.get('seasons', [])
+    episode_count_from_seasons = sum(s.get('episodeCount', 0) or s.get('episode_count', 0) for s in seasons)
     season_count_from_list = len(seasons)
     
-    # Méthode 2: Depuis numberOfSeasons/numberOfEpisodes (champs directs)
-    season_count_from_field = media.get('numberOfSeasons', 0)
-    episode_count_from_field = media.get('numberOfEpisodes', 0)
+    # Méthode 2: Depuis numberOfSeasons/numberOfEpisodes
+    season_count_from_field = (
+        tmdb_enriched.get('season_count') or 
+        media.get('numberOfSeasons', 0)
+    )
+    episode_count_from_field = (
+        tmdb_enriched.get('episode_count') or 
+        media.get('numberOfEpisodes', 0)
+    )
     
     # Utilise la valeur la plus élevée (la plus fiable)
     season_count = max(season_count_from_list, season_count_from_field)
     episode_count = max(episode_count_from_seasons, episode_count_from_field)
     
+    # Rating et popularity avec fallback TMDB
+    rating = tmdb_enriched.get('rating') or media.get('voteAverage', 0)
+    popularity = tmdb_enriched.get('popularity') or media.get('popularity', 0)
+    genres = tmdb_enriched.get('genres') or [g.get('name', '') for g in media.get('genres', [])]
+    
     # ✨ DEBUG LOGS
     print(f"\n{'='*60}")
     print(f"🎬 REQUEST #{request_id}: {title}")
     print(f"{'='*60}")
-    print(f"📊 TMDB ID: {media.get('tmdbId')}")
+    print(f"📊 TMDB ID: {tmdb_id}")
     print(f"📺 Type: {media_type}")
     print(f"📅 Year: {year}")
     print(f"👤 User: {requested_by} (ID: {user_id})")
+    if tmdb_enriched:
+        print(f"🌐 Data source: TMDB API enrichment ✅")
+    else:
+        print(f"📦 Data source: Overseerr")
     print(f"\n📈 CONTENT STATS:")
     print(f"  Seasons: {season_count} (list={season_count_from_list}, field={season_count_from_field})")
     print(f"  Episodes: {episode_count} (list={episode_count_from_seasons}, field={episode_count_from_field})")
-    print(f"  Rating: {media.get('voteAverage', 0)}/10")
-    print(f"  Popularity: {media.get('popularity', 0)}")
-    print(f"  Genres: {', '.join([g.get('name', '') for g in media.get('genres', [])])}")
+    print(f"  Rating: {rating}/10")
+    print(f"  Popularity: {popularity}")
+    print(f"  Genres: {', '.join(genres) if genres else 'N/A'}")
     print(f"{'='*60}")
     
     # ✨ Enrichir data pour modération intelligente
@@ -200,12 +278,12 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
         'year': year,
         'requested_by': requested_by,
         'user_id': user_id,
-        'rating': media.get('voteAverage', 0),
-        'popularity': media.get('popularity', 0),
-        'genres': [g.get('name', '') for g in media.get('genres', [])],
+        'rating': rating,
+        'popularity': popularity,
+        'genres': genres,
         'episode_count': episode_count,
         'season_count': season_count,
-        'awards': [],  # TODO: Fetch from TMDB if available
+        'awards': [],
     }
     
     # Calculer user_age_days depuis Overseerr
@@ -335,6 +413,7 @@ async def manual_moderate():
     }
 
 
+# ✨ NOUVEAU: Endpoint HTML pour HTMX
 @app.get("/moderate-html", response_class=HTMLResponse)
 async def moderate_html():
     """Endpoint HTML pour HTMX - Modération manuelle"""
@@ -476,7 +555,6 @@ async def moderate_html():
 </div>
 '''
         return HTMLResponse(content=error_html)
-
 
 
 @app.get("/stats")
