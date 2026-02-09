@@ -11,6 +11,12 @@ import json
 # ✨ IMPORTS CORRIGÉS - Utilise chemin absolu depuis app/
 from app.config_loader import ConfigManager, SmartModerator, ModerationDecision
 from app.ml_feedback import FeedbackDatabase, EnhancedModerator
+from app.openai_moderator import OpenAIModerator
+from app.rules_validator import RulesValidator
+
+# Initialize AI-first system
+openai_moderator = OpenAIModerator() if OPENAI_API_KEY else None
+rules_validator = RulesValidator(config)
 
 app = FastAPI(title="PlexStaffAI", version="1.6.0")
 
@@ -195,7 +201,14 @@ def get_title_from_media(media: dict, tmdb_enriched: dict = None) -> str:
 
 
 def moderate_request(request_id: int, request_data: dict) -> dict:
-    """Moderate request with smart rules + ML"""
+    """
+    AI-FIRST Moderation with Rules Validation
+    
+    Workflow:
+    1. OpenAI fait l'analyse primaire (raisonnement complet)
+    2. Rules valident/ajustent/override la décision AI
+    3. Décision finale basée sur AI + Rules combined
+    """
     
     # Extract metadata from Overseerr
     media = request_data.get('media', {})
@@ -221,13 +234,11 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
     requested_by = request_data.get('requestedBy', {}).get('displayName', 'unknown')
     user_id = str(request_data.get('requestedBy', {}).get('id', 'unknown'))
     
-    # ✨ EXTRACTION ROBUSTE DES COUNTS avec données TMDB
-    # Méthode 1: Depuis seasons[] (liste détaillée)
+    # EXTRACTION ROBUSTE DES COUNTS
     seasons = tmdb_enriched.get('seasons') or media.get('seasons', [])
     episode_count_from_seasons = sum(s.get('episodeCount', 0) or s.get('episode_count', 0) for s in seasons)
     season_count_from_list = len(seasons)
     
-    # Méthode 2: Depuis numberOfSeasons/numberOfEpisodes
     season_count_from_field = (
         tmdb_enriched.get('season_count') or 
         media.get('numberOfSeasons', 0)
@@ -237,16 +248,14 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
         media.get('numberOfEpisodes', 0)
     )
     
-    # Utilise la valeur la plus élevée (la plus fiable)
     season_count = max(season_count_from_list, season_count_from_field)
     episode_count = max(episode_count_from_seasons, episode_count_from_field)
     
-    # Rating et popularity avec fallback TMDB
     rating = tmdb_enriched.get('rating') or media.get('voteAverage', 0)
     popularity = tmdb_enriched.get('popularity') or media.get('popularity', 0)
     genres = tmdb_enriched.get('genres') or [g.get('name', '') for g in media.get('genres', [])]
     
-    # ✨ DEBUG LOGS
+    # DEBUG LOGS
     print(f"\n{'='*60}")
     print(f"🎬 REQUEST #{request_id}: {title}")
     print(f"{'='*60}")
@@ -259,14 +268,14 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
     else:
         print(f"📦 Data source: Overseerr")
     print(f"\n📈 CONTENT STATS:")
-    print(f"  Seasons: {season_count} (list={season_count_from_list}, field={season_count_from_field})")
-    print(f"  Episodes: {episode_count} (list={episode_count_from_seasons}, field={episode_count_from_field})")
+    print(f"  Seasons: {season_count}")
+    print(f"  Episodes: {episode_count}")
     print(f"  Rating: {rating}/10")
     print(f"  Popularity: {popularity}")
     print(f"  Genres: {', '.join(genres) if genres else 'N/A'}")
     print(f"{'='*60}")
     
-    # ✨ Enrichir data pour modération intelligente
+    # Enrichir data
     enriched_data = {
         'title': title,
         'media_type': media_type,
@@ -281,7 +290,7 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
         'awards': [],
     }
     
-    # Calculer user_age_days depuis Overseerr
+    # Calculer user_age_days
     user_created = request_data.get('requestedBy', {}).get('createdAt', '')
     if user_created:
         try:
@@ -291,25 +300,49 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
         except:
             enriched_data['user_age_days'] = 999
     
-    # ✨ NOUVELLE LOGIQUE: Config rules + ML
-    decision_result = moderator.moderate_with_learning(enriched_data)
+    # ✨✨✨ NIVEAU 1: OPENAI PRIMARY ANALYSIS ✨✨✨
+    if openai_moderator:
+        ai_result = openai_moderator.moderate(enriched_data)
+        
+        # ✨✨✨ NIVEAU 2: RULES VALIDATION ✨✨✨
+        validation_result = rules_validator.validate(ai_result, enriched_data)
+        
+        decision = validation_result['final_decision']
+        confidence = validation_result['final_confidence']
+        reason = validation_result['final_reason']
+        
+        # Determine rule_matched
+        if validation_result['rule_override']:
+            rule_matched = f"ai_override:{','.join(validation_result['rules_matched'][:2])}"
+        else:
+            rule_matched = f"ai_primary:{ai_result.get('model_used', 'gpt-4o-mini')}"
+        
+    else:
+        # Fallback si pas d'OpenAI (ne devrait pas arriver)
+        print("⚠️  OpenAI not configured, using rule-based fallback")
+        decision_result = moderator.moderate_with_learning(enriched_data)
+        decision = decision_result['decision']
+        reason = decision_result['reason']
+        confidence = decision_result.get('confidence', 1.0)
+        rule_matched = decision_result.get('rule_matched', 'fallback')
     
-    decision = decision_result['decision']
-    reason = decision_result['reason']
-    confidence = decision_result.get('confidence', 1.0)
-    rule_matched = decision_result.get('rule_matched', 'none')
-    
-    # ✨ LOG DECISION
+    # LOG FINAL DECISION
     emoji = '✅' if decision == 'APPROVED' else '❌' if decision == 'REJECTED' else '🧑‍⚖️'
-    print(f"\n{emoji} DECISION: {decision}")
+    print(f"\n{emoji} {'='*60}")
+    print(f"{emoji} FINAL DECISION: {decision}")
     print(f"📝 Reason: {reason}")
-    print(f"🎯 Rule: {rule_matched}")
+    print(f"🎯 Path: {rule_matched}")
     print(f"💯 Confidence: {confidence:.1%}")
-    print(f"{'='*60}\n")
+    print(f"{emoji} {'='*60}\n")
     
-    # ✨ GESTION NEEDS_REVIEW
-    if decision == ModerationDecision.NEEDS_REVIEW:
-        save_for_review(request_id, enriched_data, decision_result)
+    # GESTION NEEDS_REVIEW
+    if decision == 'NEEDS_REVIEW':
+        save_for_review(request_id, enriched_data, {
+            'decision': decision,
+            'reason': reason,
+            'confidence': confidence,
+            'rule_matched': rule_matched
+        })
         return {
             'decision': 'NEEDS_REVIEW',
             'reason': reason,
@@ -318,13 +351,13 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
             'title': title
         }
     
-    # Actions Overseerr (APPROVE/REJECT)
-    if decision == ModerationDecision.APPROVED:
+    # Actions Overseerr
+    if decision == 'APPROVED':
         approve_overseerr_request(request_id)
-    elif decision == ModerationDecision.REJECTED:
+    elif decision == 'REJECTED':
         decline_overseerr_request(request_id)
     
-    # Save to database avec métadonnées
+    # Save to database
     save_decision(request_id, decision, reason, confidence, rule_matched, enriched_data)
     
     return {
@@ -335,7 +368,6 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
         'rule_matched': rule_matched,
         'title': title
     }
-
 
 def save_for_review(request_id: int, request_data: dict, decision_result: dict):
     """Save request for staff review"""
