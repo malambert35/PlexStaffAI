@@ -133,23 +133,65 @@ def decline_overseerr_request(request_id: int):
         return False
 
 
+def get_title_from_media(media: dict) -> str:
+    """Extrait le titre avec fallback robuste"""
+    candidates = [
+        media.get('title'),
+        media.get('name'),
+        media.get('originalTitle'),
+        media.get('originalName')
+    ]
+    
+    # Retourne le premier non-vide
+    for candidate in candidates:
+        if candidate and candidate.strip():
+            return candidate.strip()
+    
+    # Fallback TMDB ID
+    return f"TMDB-{media.get('tmdbId', 'unknown')}"
+
+
 def moderate_request(request_id: int, request_data: dict) -> dict:
     """Moderate request with smart rules + ML"""
     
     # Extract metadata from Overseerr
     media = request_data.get('media', {})
-    title = (
-        media.get('title') or 
-        media.get('name') or 
-        media.get('originalTitle') or 
-        media.get('originalName') or 
-        f"TMDB-{media.get('tmdbId', 'unknown')}"
-    )
+    title = get_title_from_media(media)
     
     media_type = media.get('mediaType', 'unknown')
     year = media.get('releaseDate', '')[:4] if media.get('releaseDate') else ''
     requested_by = request_data.get('requestedBy', {}).get('displayName', 'unknown')
     user_id = str(request_data.get('requestedBy', {}).get('id', 'unknown'))
+    
+    # ✨ EXTRACTION ROBUSTE DES COUNTS
+    # Méthode 1: Depuis seasons[] (liste détaillée)
+    seasons = media.get('seasons', [])
+    episode_count_from_seasons = sum(s.get('episodeCount', 0) for s in seasons)
+    season_count_from_list = len(seasons)
+    
+    # Méthode 2: Depuis numberOfSeasons/numberOfEpisodes (champs directs)
+    season_count_from_field = media.get('numberOfSeasons', 0)
+    episode_count_from_field = media.get('numberOfEpisodes', 0)
+    
+    # Utilise la valeur la plus élevée (la plus fiable)
+    season_count = max(season_count_from_list, season_count_from_field)
+    episode_count = max(episode_count_from_seasons, episode_count_from_field)
+    
+    # ✨ DEBUG LOGS
+    print(f"\n{'='*60}")
+    print(f"🎬 REQUEST #{request_id}: {title}")
+    print(f"{'='*60}")
+    print(f"📊 TMDB ID: {media.get('tmdbId')}")
+    print(f"📺 Type: {media_type}")
+    print(f"📅 Year: {year}")
+    print(f"👤 User: {requested_by} (ID: {user_id})")
+    print(f"\n📈 CONTENT STATS:")
+    print(f"  Seasons: {season_count} (list={season_count_from_list}, field={season_count_from_field})")
+    print(f"  Episodes: {episode_count} (list={episode_count_from_seasons}, field={episode_count_from_field})")
+    print(f"  Rating: {media.get('voteAverage', 0)}/10")
+    print(f"  Popularity: {media.get('popularity', 0)}")
+    print(f"  Genres: {', '.join([g.get('name', '') for g in media.get('genres', [])])}")
+    print(f"{'='*60}")
     
     # ✨ Enrichir data pour modération intelligente
     enriched_data = {
@@ -161,8 +203,8 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
         'rating': media.get('voteAverage', 0),
         'popularity': media.get('popularity', 0),
         'genres': [g.get('name', '') for g in media.get('genres', [])],
-        'episode_count': sum(s.get('episodeCount', 0) for s in media.get('seasons', [])),
-        'season_count': len(media.get('seasons', [])),
+        'episode_count': episode_count,
+        'season_count': season_count,
         'awards': [],  # TODO: Fetch from TMDB if available
     }
     
@@ -172,6 +214,7 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
         try:
             created_date = datetime.fromisoformat(user_created.replace('Z', '+00:00'))
             enriched_data['user_age_days'] = (datetime.now(created_date.tzinfo) - created_date).days
+            print(f"👶 User age: {enriched_data['user_age_days']} days")
         except:
             enriched_data['user_age_days'] = 999
     
@@ -182,6 +225,14 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
     reason = decision_result['reason']
     confidence = decision_result.get('confidence', 1.0)
     rule_matched = decision_result.get('rule_matched', 'none')
+    
+    # ✨ LOG DECISION
+    emoji = '✅' if decision == 'APPROVED' else '❌' if decision == 'REJECTED' else '🧑‍⚖️'
+    print(f"\n{emoji} DECISION: {decision}")
+    print(f"📝 Reason: {reason}")
+    print(f"🎯 Rule: {rule_matched}")
+    print(f"💯 Confidence: {confidence:.1%}")
+    print(f"{'='*60}\n")
     
     # ✨ GESTION NEEDS_REVIEW
     if decision == ModerationDecision.NEEDS_REVIEW:
