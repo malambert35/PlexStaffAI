@@ -11,23 +11,23 @@ const translations = {
         systemLive: "Système Live • Cron Actif",
         
         // Review Dashboard button
-        reviewDashboard: "Review Dashboard",
-        managePending: "Manage pending reviews",
-        pendingReviews: "Pending",
-        reviews: "Reviews",
+        reviewDashboard: "Tableau de Révision",
+        managePending: "Gérer les révisions en attente",
+        pendingReviews: "En attente",
+        reviews: "Révisions",
         
         // Buttons
         moderateNow: "MODÉRER MAINTENANT",
-        refreshStats: "REFRESH STATS",
+        refreshStats: "ACTUALISER STATS",
         viewHistory: "VOIR HISTORIQUE",
         
         // Stats cards
         totalDecisions: "Total",
         totalDecisionsDesc: "Décisions totales",
         approved: "Approuvés",
-        approvedDesc: "Requests validées",
+        approvedDesc: "Requetes validées",
         rejected: "Rejetés",
-        rejectedDesc: "Requests refusées",
+        rejectedDesc: "Requetes refusées",
         approvalRate: "Taux",
         approvalRateDesc: "Taux d'approbation",
         
@@ -38,17 +38,17 @@ const translations = {
         autoScanInfo: "Le système scanne automatiquement toutes les",
         
         // Loading
-        loading: "Modération en cours...",
+        loading: "⏳ Modération en cours...",
         
         // Quick links
-        quickLinks: "Quick Links",
-        apiDocs: "API Docs",
-        healthCheck: "Health Check",
+        quickLinks: "Liens Rapides",
+        apiDocs: "Documentation API",
+        healthCheck: "État Système",
         fullReport: "Rapport Complet",
-        openaiStats: "OpenAI Stats",
+        openaiStats: "Statistiques OpenAI",
         
         // Footer
-        poweredBy: "Powered by",
+        poweredBy: "Propulsé par",
         dockerHub: "Docker Hub",
         
         // Misc
@@ -93,7 +93,7 @@ const translations = {
         autoScanInfo: "System automatically scans every",
         
         // Loading
-        loading: "Moderation in progress...",
+        loading: "⏳ Moderation in progress...",
         
         // Quick links
         quickLinks: "Quick Links",
@@ -131,7 +131,10 @@ function updatePageLanguage() {
     // Update all elements with data-i18n attribute
     document.querySelectorAll('[data-i18n]').forEach(element => {
         const key = element.getAttribute('data-i18n');
-        element.textContent = t(key);
+        const translation = t(key);
+        if (translation) {
+            element.textContent = translation;
+        }
     });
     
     // Update placeholders
@@ -144,7 +147,10 @@ function updatePageLanguage() {
     document.querySelectorAll('.lang-btn').forEach(btn => {
         btn.classList.remove('active');
     });
-    document.querySelector(`[data-lang="${lang}"]`).classList.add('active');
+    const activeBtn = document.querySelector('[data-lang="' + lang + '"]');
+    if (activeBtn) {
+        activeBtn.classList.add('active');
+    }
 }
 
 // Initialize on load
