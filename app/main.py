@@ -156,11 +156,10 @@ async def health_check():
     operational_count = sum(1 for s in services.values() if s['status'] == 'operational')
     total_count = len(services)
     
-    # Uptime (fake for now, you can implement real uptime tracking)
-    uptime = "99.9%"
+    # Generate HTML - START
+    html_parts = []
     
-    # Generate HTML
-    html = f'''
+    html_parts.append('''
 <!DOCTYPE html>
 <html lang="fr">
 <head>
@@ -169,21 +168,21 @@ async def health_check():
     <title>System Status - PlexStaffAI</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
-        @keyframes pulse-ring {{
-            0% {{ transform: scale(1); opacity: 1; }}
-            100% {{ transform: scale(1.5); opacity: 0; }}
-        }}
-        .status-pulse {{
+        @keyframes pulse-ring {
+            0% { transform: scale(1); opacity: 1; }
+            100% { transform: scale(1.5); opacity: 0; }
+        }
+        .status-pulse {
             animation: pulse-ring 2s ease-out infinite;
-        }}
-        @keyframes fadeIn {{
-            from {{ opacity: 0; transform: translateY(20px); }}
-            to {{ opacity: 1; transform: translateY(0); }}
-        }}
-        .fade-in {{ animation: fadeIn 0.5s ease-out; }}
-        .gradient-bg {{
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(20px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .fade-in { animation: fadeIn 0.5s ease-out; }
+        .gradient-bg {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        }}
+        }
     </style>
     <meta http-equiv="refresh" content="30">
 </head>
@@ -205,6 +204,9 @@ async def health_check():
                     🏠 Dashboard
                 </a>
             </div>
+    ''')
+    
+    html_parts.append(f'''
             <div class="text-sm text-gray-500">
                 🔄 Auto-refresh toutes les 30 secondes • Dernière mise à jour: {datetime.now().strftime("%H:%M:%S")}
             </div>
@@ -212,10 +214,10 @@ async def health_check():
 
         <!-- Overall Status Banner -->
         <div class="mb-8 fade-in">
-    '''
+    ''')
     
     if overall_status == 'healthy':
-        html += '''
+        html_parts.append('''
             <div class="gradient-bg p-8 rounded-2xl shadow-2xl border-2 border-green-500">
                 <div class="flex items-center justify-between">
                     <div class="flex items-center gap-6">
@@ -236,9 +238,9 @@ async def health_check():
                     </div>
                 </div>
             </div>
-        '''
+        ''')
     else:
-        html += '''
+        html_parts.append('''
             <div class="bg-gradient-to-r from-yellow-600 to-orange-600 p-8 rounded-2xl shadow-2xl border-2 border-yellow-500">
                 <div class="flex items-center gap-6">
                     <div class="w-20 h-20 bg-yellow-500 rounded-full flex items-center justify-center">
@@ -250,15 +252,16 @@ async def health_check():
                     </div>
                 </div>
             </div>
-        '''
+        ''')
     
-    html += f'''
+    html_parts.append('''
         </div>
 
         <!-- Services Grid -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
-    '''
+    ''')
     
+    # Generate service cards
     for service_key, service in services.items():
         status = service['status']
         
@@ -269,24 +272,28 @@ async def health_check():
             border_color = 'border-green-700'
             bg_color = 'bg-green-900/20'
             status_label = '✅ Opérationnel'
+            pulse_html = '<div class="absolute inset-0 w-4 h-4 bg-green-500 rounded-full status-pulse"></div>'
         elif status == 'error':
             status_color = 'bg-red-500'
             status_text = 'text-red-400'
             border_color = 'border-red-700'
             bg_color = 'bg-red-900/20'
             status_label = '❌ Erreur'
+            pulse_html = ''
         elif status == 'optional':
             status_color = 'bg-gray-500'
             status_text = 'text-gray-400'
             border_color = 'border-gray-700'
             bg_color = 'bg-gray-900/20'
             status_label = '⚪ Optionnel'
-        else:  # missing or disabled
+            pulse_html = ''
+        else:
             status_color = 'bg-yellow-500'
             status_text = 'text-yellow-400'
             border_color = 'border-yellow-700'
             bg_color = 'bg-yellow-900/20'
             status_label = '⚠️ Non configuré'
+            pulse_html = ''
         
         stats_html = ''
         if 'stats' in service:
@@ -294,7 +301,9 @@ async def health_check():
         if 'version' in service:
             stats_html += f'<div class="text-xs text-gray-500 mt-1">Version: {service["version"]}</div>'
         
-        html += f'''
+        connected_html = '<span class="text-xs text-green-400">✓ Connecté</span>' if status == 'operational' else ''
+        
+        html_parts.append(f'''
             <div class="{bg_color} backdrop-blur-xl p-6 rounded-xl border {border_color} fade-in hover:scale-105 transition-transform">
                 <div class="flex items-start justify-between mb-4">
                     <div class="flex items-center gap-3">
@@ -306,18 +315,18 @@ async def health_check():
                     </div>
                     <div class="relative">
                         <div class="w-4 h-4 {status_color} rounded-full"></div>
-                        {"" if status != "operational" else '<div class="absolute inset-0 w-4 h-4 ' + status_color + ' rounded-full status-pulse"></div>'}
+                        {pulse_html}
                     </div>
                 </div>
                 <div class="flex items-center justify-between">
                     <div class="text-sm font-semibold {status_text}">{status_label}</div>
-                    {"<span class=\"text-xs text-green-400\">✓ Connecté</span>" if status == "operational" else ""}
+                    {connected_html}
                 </div>
                 {stats_html}
             </div>
-        '''
+        ''')
     
-    html += '''
+    html_parts.append(f'''
         </div>
 
         <!-- System Info -->
@@ -330,16 +339,13 @@ async def health_check():
             
             <div class="bg-gray-800/50 backdrop-blur-xl p-6 rounded-xl border border-gray-700">
                 <div class="text-gray-400 text-sm font-semibold mb-2">🔧 SERVICES</div>
-    '''
-    
-    html += f'''
                 <div class="text-3xl font-black text-white">{operational_count}/{total_count}</div>
                 <div class="text-xs text-gray-500 mt-2">Services actifs</div>
             </div>
             
             <div class="bg-gray-800/50 backdrop-blur-xl p-6 rounded-xl border border-gray-700">
                 <div class="text-gray-400 text-sm font-semibold mb-2">⏱️ UPTIME</div>
-                <div class="text-3xl font-black text-white">{uptime}</div>
+                <div class="text-3xl font-black text-white">99.9%</div>
                 <div class="text-xs text-gray-500 mt-2">Disponibilité</div>
             </div>
         </div>
@@ -412,10 +418,9 @@ async def health_check():
     </div>
 </body>
 </html>
-    '''
+    ''')
     
-    return HTMLResponse(content=html)
-
+    return HTMLResponse(content=''.join(html_parts))
 
 def get_overseerr_requests():
     """Fetch pending requests from Overseerr"""
