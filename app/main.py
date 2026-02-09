@@ -8,7 +8,7 @@ import sqlite3
 from pathlib import Path
 import json
 
-# ✨ NOUVEAUX IMPORTS v1.6
+# ✨ IMPORTS CORRIGÉS - Utilise chemin absolu depuis app/
 from app.config_loader import ConfigManager, SmartModerator, ModerationDecision
 from app.ml_feedback import FeedbackDatabase, EnhancedModerator
 
