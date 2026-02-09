@@ -1588,38 +1588,198 @@ async def ml_stats():
     }
 
 
-@app.get("/staff/openai-stats")
-async def openai_stats():
-    """OpenAI usage statistics"""
+@app.get("/staff/openai-stats", response_class=HTMLResponse)
+async def openai_stats_html():
+    """OpenAI statistics page with language support"""
+    
+    # Récupère les stats (adapte selon ton implémentation)
     if not openai_moderator:
-        return {'enabled': False, 'message': 'OpenAI not configured'}
+        stats = {
+            "total_calls": 0,
+            "total_tokens": 0,
+            "total_cost": 0.0,
+            "by_model": {},
+            "recent_calls": []
+        }
+    else:
+        stats = openai_moderator.get_usage_stats() if hasattr(openai_moderator, 'get_usage_stats') else {
+            "total_calls": 0,
+            "total_tokens": 0,
+            "total_cost": 0.0,
+            "by_model": {},
+            "recent_calls": []
+        }
     
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
+    # Calculs
+    total_calls = stats.get("total_calls", 0)
+    total_tokens = stats.get("total_tokens", 0)
+    total_cost = stats.get("total_cost", 0.0)
+    avg_cost = (total_cost / total_calls) if total_calls > 0 else 0
+    avg_tokens = (total_tokens / total_calls) if total_calls > 0 else 0
     
-    cursor.execute("""
-        SELECT COUNT(*) FROM decisions 
-        WHERE rule_matched LIKE 'ai_primary:%' OR rule_matched LIKE 'ai_override:%'
-    """)
-    openai_count = cursor.fetchone()[0]
+    # By Model table
+    by_model_html = ""
+    for model, data in stats.get("by_model", {}).items():
+        by_model_html += f"""
+        <tr class="border-b border-gray-700 hover:bg-gray-700/30 transition">
+            <td class="px-4 py-3 font-mono text-sm">{model}</td>
+            <td class="px-4 py-3 text-center">{data.get('calls', 0)}</td>
+            <td class="px-4 py-3 text-center">{data.get('tokens', 0):,}</td>
+            <td class="px-4 py-3 text-center font-semibold text-emerald-400">${data.get('cost', 0):.4f}</td>
+        </tr>
+        """
     
-    cursor.execute("SELECT COUNT(*) FROM decisions")
-    total_count = cursor.fetchone()[0]
+    # Recent calls table
+    recent_html = ""
+    for call in stats.get("recent_calls", [])[:10]:
+        recent_html += f"""
+        <tr class="border-b border-gray-700 hover:bg-gray-700/30 transition">
+            <td class="px-4 py-3 text-sm text-gray-400">{call.get('timestamp', 'N/A')}</td>
+            <td class="px-4 py-3 font-mono text-xs">{call.get('model', 'N/A')}</td>
+            <td class="px-4 py-3 text-center">{call.get('prompt_tokens', 0)}</td>
+            <td class="px-4 py-3 text-center">{call.get('completion_tokens', 0)}</td>
+            <td class="px-4 py-3 text-center font-semibold">{call.get('total_tokens', 0)}</td>
+            <td class="px-4 py-3 text-center text-emerald-400">${call.get('cost', 0):.6f}</td>
+        </tr>
+        """
     
-    conn.close()
+    html_content = f"""
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title data-i18n="openaiStatsTitle">Statistiques OpenAI</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        .lang-selector {{
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 100;
+            display: flex;
+            gap: 8px;
+            background: rgba(31, 41, 55, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 8px;
+            border-radius: 12px;
+            border: 1px solid rgba(75, 85, 99, 0.5);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }}
+        .lang-btn {{
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid transparent;
+            background: transparent;
+            color: #9CA3AF;
+        }}
+        .lang-btn:hover {{
+            background: rgba(75, 85, 99, 0.5);
+            color: #E5E7EB;
+        }}
+        .lang-btn.active {{
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-color: rgba(102, 126, 234, 0.5);
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+        }}
+        .lang-btn .flag {{
+            font-size: 18px;
+            margin-right: 6px;
+        }}
+        @keyframes pulse {{
+            0%, 100% {{ opacity: 1; }}
+            50% {{ opacity: 0.5; }}
+        }}
+        .pulse {{
+            animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+        }}
+    </style>
+</head>
+<body class="bg-gray-900 text-white font-sans antialiased">
     
-    cost_per_request = 0.02
-    
-    return {
-        'enabled': True,
-        'total_ai_decisions': openai_count,
-        'total_decisions': total_count,
-        'ai_usage_rate': round(openai_count / total_count * 100, 1) if total_count > 0 else 0,
-        'estimated_cost_so_far': round(openai_count * cost_per_request, 2),
-        'cost_per_request': cost_per_request,
-        'model': 'gpt-4o-mini'
-    }
+    <div class="lang-selector">
+        <button class="lang-btn active" data-lang="fr" onclick="setLanguage('fr')">
+            <span class="flag">🇫🇷</span> FR
+        </button>
+        <button class="lang-btn" data-lang="en" onclick="setLanguage('en')">
+            <span class="flag">🇬🇧</span> EN
+        </button>
+    </div>
 
+    <div class="max-w-7xl mx-auto px-4 py-12">
+        <div class="mb-8">
+            <a href="/" class="text-blue-400 hover:text-blue-300 transition">
+                <span data-i18n="backToDashboard">← Retour au Dashboard</span>
+            </a>
+        </div>
+        
+        <div class="bg-gradient-to-br from-gray-800 to-gray-900 p-8 rounded-3xl border border-gray-700 shadow-2xl">
+            <div class="flex justify-between items-center mb-8">
+                <h1 class="text-4xl font-black bg-gradient-to-r from-green-400 to-emerald-400 bg-clip-text text-transparent">
+                    🤖 <span data-i18n="openaiStatsTitle">Statistiques OpenAI</span>
+                </h1>
+                <button onclick="location.reload()" class="px-6 py-2 bg-emerald-600 hover:bg-emerald-700 rounded-lg font-semibold transition">
+                    🔄 <span data-i18n="reportRefresh">Actualiser</span>
+                </button>
+            </div>
+            
+            <!-- Global Stats -->
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-12">
+                <div class="bg-gradient-to-br from-blue-900 to-indigo-900 p-6 rounded-2xl border border-blue-700">
+                    <div class="text-blue-300 mb-2 text-sm font-semibold" data-i18n="openaiTotalCalls">Appels Totaux</div>
+                    <div class="text-4xl font-black text-white">{total_calls:,}</div>
+                </div>
+                <div class="bg-gradient-to-br from-purple-900 to-pink-900 p-6 rounded-2xl border border-purple-700">
+                    <div class="text-purple-300 mb-2 text-sm font-semibold" data-i18n="openaiTotalTokens">Tokens Totaux</div>
+                    <div class="text-4xl font-black text-white">{total_tokens:,}</div>
+                </div>
+                <div class="bg-gradient-to-br from-emerald-900 to-teal-900 p-6 rounded-2xl border border-emerald-700">
+                    <div class="text-emerald-300 mb-2 text-sm font-semibold" data-i18n="openaiTotalCost">Coût Total</div>
+                    <div class="text-4xl font-black text-emerald-300">${total_cost:.4f}</div>
+                </div>
+                <div class="bg-gradient-to-br from-yellow-900 to-orange-900 p-6 rounded-2xl border border-yellow-700">
+                    <div class="text-yellow-300 mb-2 text-sm font-semibold" data-i18n="openaiAverageCost">Coût Moyen</div>
+                    <div class="text-4xl font-black text-yellow-300">${avg_cost:.6f}</div>
+                </div>
+            </div>
+            
+            <!-- By Model Table -->
+            {'<div class="mb-12"><h2 class="text-2xl font-bold mb-6"><span data-i18n="openaiByModel">Par Modèle</span></h2><div class="overflow-x-auto bg-gray-800/50 rounded-2xl border border-gray-700"><table class="w-full"><thead class="bg-gray-700/50"><tr><th class="px-4 py-3 text-left" data-i18n="openaiModel">Modèle</th><th class="px-4 py-3 text-center" data-i18n="openaiCalls">Appels</th><th class="px-4 py-3 text-center" data-i18n="openaiTokensUsed">Tokens Utilisés</th><th class="px-4 py-3 text-center" data-i18n="openaiCost">Coût</th></tr></thead><tbody>' + by_model_html + '</tbody></table></div></div>' if by_model_html else '<div class="mb-12 text-center py-8 text-gray-400"><p data-i18n="openaiNoStats">Aucune statistique par modèle disponible</p></div>'}
+            
+            <!-- Recent Calls Table -->
+            {'<div><h2 class="text-2xl font-bold mb-6"><span data-i18n="openaiRecentCalls">Appels Récents</span></h2><div class="overflow-x-auto bg-gray-800/50 rounded-2xl border border-gray-700"><table class="w-full"><thead class="bg-gray-700/50"><tr><th class="px-4 py-3 text-left" data-i18n="openaiTimestamp">Horodatage</th><th class="px-4 py-3 text-left" data-i18n="openaiModel">Modèle</th><th class="px-4 py-3 text-center" data-i18n="openaiPromptTokens">Prompt</th><th class="px-4 py-3 text-center" data-i18n="openaiCompletionTokens">Complétion</th><th class="px-4 py-3 text-center">Total</th><th class="px-4 py-3 text-center" data-i18n="openaiCost">Coût</th></tr></thead><tbody>' + recent_html + '</tbody></table></div></div>' if recent_html else '<div class="text-center py-8 text-gray-400"><p data-i18n="openaiNoStats">Aucun appel récent</p></div>'}
+            
+            <!-- Info Box -->
+            <div class="mt-8 p-6 bg-blue-900/20 border border-blue-700 rounded-2xl">
+                <div class="flex items-start gap-3">
+                    <span class="text-3xl">💡</span>
+                    <div class="flex-1">
+                        <h3 class="font-bold text-blue-300 mb-2">À propos des coûts</h3>
+                        <p class="text-sm text-gray-300">
+                            Les coûts sont calculés selon les tarifs OpenAI actuels. 
+                            Les tokens de prompt et de complétion ont des prix différents selon le modèle utilisé.
+                        </p>
+                        <div class="mt-3 text-xs text-gray-400">
+                            <strong>GPT-4o-mini:</strong> $0.150 / 1M tokens input • $0.600 / 1M tokens output<br>
+                            <strong>GPT-4o:</strong> $2.50 / 1M tokens input • $10.00 / 1M tokens output
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script src="/static/translations.js"></script>
+</body>
+</html>
+    """
+    return HTMLResponse(content=html_content)
 
 # ✨ CONFIGURE SCHEDULER ON STARTUP
 @app.on_event("startup")
