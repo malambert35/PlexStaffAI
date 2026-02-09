@@ -7,6 +7,9 @@ from datetime import datetime, timedelta
 import sqlite3
 from pathlib import Path
 import json
+from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.triggers.interval import IntervalTrigger
+import atexit
 
 # ✨ IMPORTS - Système AI-First
 from app.config_loader import ConfigManager, SmartModerator, ModerationDecision
@@ -21,6 +24,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OVERSEERR_API_URL = os.getenv("OVERSEERR_API_URL", "http://overseerr:5055")
 OVERSEERR_API_KEY = os.getenv("OVERSEERR_API_KEY")
 TMDB_API_KEY = os.getenv("TMDB_API_KEY", "")
+SCAN_INTERVAL_MINUTES = int(os.getenv("SCAN_INTERVAL_MINUTES", "1"))
 
 # ✨ AI-FIRST SYSTEM
 config = ConfigManager("/config/config.yaml")
@@ -31,6 +35,14 @@ rules_validator = RulesValidator(config)
 
 # Database
 DB_PATH = "/config/moderation.db"
+
+# ✨ SCHEDULER SETUP
+scheduler = BackgroundScheduler()
+scheduler.start()
+
+# Shutdown scheduler on app exit
+atexit.register(lambda: scheduler.shutdown())
+
 
 def init_db():
     """Initialize database with all tables"""
@@ -398,6 +410,41 @@ def save_decision(request_id: int, decision: str, reason: str,
     conn.close()
 
 
+def auto_moderate_pending():
+    """Fonction appelée automatiquement par le scheduler"""
+    try:
+        print(f"\n⏰ {'='*60}")
+        print(f"⏰ AUTO-SCAN TRIGGERED at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"⏰ {'='*60}\n")
+        
+        requests = get_overseerr_requests()
+        
+        if not requests:
+            print("✅ No pending requests found")
+            return
+        
+        print(f"📊 Found {len(requests)} pending request(s)")
+        
+        results = []
+        for req in requests:
+            print(f"\n🎬 Processing request #{req['id']}...")
+            result = moderate_request(req['id'], req)
+            results.append(result)
+        
+        approved = sum(1 for r in results if r.get('decision') == 'APPROVED')
+        rejected = sum(1 for r in results if r.get('decision') == 'REJECTED')
+        needs_review = sum(1 for r in results if r.get('decision') == 'NEEDS_REVIEW')
+        
+        print(f"\n⏰ AUTO-SCAN COMPLETE:")
+        print(f"   ✅ Approved: {approved}")
+        print(f"   ❌ Rejected: {rejected}")
+        print(f"   🧑‍⚖️ Needs Review: {needs_review}")
+        print(f"⏰ {'='*60}\n")
+        
+    except Exception as e:
+        print(f"❌ Auto-scan error: {e}")
+
+
 @app.get("/staff/moderate")
 @app.post("/staff/moderate")
 async def manual_moderate():
@@ -519,7 +566,7 @@ async def moderate_html():
             <div class="text-6xl mb-4">✨</div>
             <div class="text-2xl font-bold mb-2">Aucune requête en attente</div>
             <div class="text-lg">Tous les contenus ont été modérés !</div>
-            <div class="text-sm text-gray-600 mt-2">Le système scan automatiquement toutes les 15 minutes</div>
+            <div class="text-sm text-gray-600 mt-2">Le système scan automatiquement toutes les ''' + str(SCAN_INTERVAL_MINUTES) + ''' minute(s)</div>
         </div>
 '''
         
@@ -545,7 +592,7 @@ async def moderate_html():
     </div>
     
     <div class="text-center text-gray-500 text-sm mt-4">
-        ⏱️ Modération terminée • Prochaine auto-scan dans 1min
+        ⏱️ Modération terminée • Prochain auto-scan dans {SCAN_INTERVAL_MINUTES} min
     </div>
 </div>
 '''
@@ -597,7 +644,8 @@ async def stats():
         "rejected": stats.get('REJECTED', 0),
         "needs_review": stats.get('NEEDS_REVIEW', 0),
         "approval_rate": round(approved / total * 100, 1) if total > 0 else 0,
-        "last_24h": last_24h
+        "last_24h": last_24h,
+        "scan_interval": SCAN_INTERVAL_MINUTES
     }
 
 
@@ -686,6 +734,19 @@ async def moderation_report():
                 </a>
             </div>
         </header>
+
+        <div class="bg-gray-800/50 backdrop-blur-xl p-6 rounded-xl border border-gray-700 mb-8 fade-in">
+            <div class="flex items-center gap-3">
+                <span class="text-3xl">⏰</span>
+                <div>
+                    <div class="text-white font-bold">Auto-Scan Actif</div>
+                    <div class="text-sm text-gray-400">Scan automatique toutes les {SCAN_INTERVAL_MINUTES} minute(s)</div>
+                </div>
+                <div class="ml-auto">
+                    <div class="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
+                </div>
+            </div>
+        </div>
 
         <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8 fade-in">
             <div class="bg-gradient-to-br from-gray-800 to-gray-900 p-8 rounded-2xl shadow-2xl border border-gray-700">
@@ -1081,6 +1142,13 @@ async def health_check():
             'configured': True,
             'status': 'operational',
             'description': 'Stockage des décisions'
+        },
+        'scheduler': {
+            'name': 'Auto-Scan Scheduler',
+            'icon': '⏰',
+            'configured': True,
+            'status': 'operational',
+            'description': f'Scan automatique toutes les {SCAN_INTERVAL_MINUTES} min'
         }
     }
     
@@ -1110,8 +1178,8 @@ async def health_check():
     except:
         services['database']['status'] = 'error'
     
-    critical_services = ['openai', 'overseerr', 'database']
-    all_critical_ok = all(services[s]['status'] == 'operational' for s in critical_services)
+    critical_services = ['openai', 'overseerr', 'database', 'scheduler']
+    all_critical_ok = all(services[s]['status'] == 'operational' for s in critical_services if s in services)
     overall_status = 'healthy' if all_critical_ok else 'degraded'
     
     operational_count = sum(1 for s in services.values() if s['status'] == 'operational')
@@ -1126,6 +1194,7 @@ async def health_check():
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>System Status - PlexStaffAI</title>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
         @keyframes pulse-ring {
@@ -1298,9 +1367,9 @@ async def health_check():
             </div>
             
             <div class="bg-gray-800/50 backdrop-blur-xl p-6 rounded-xl border border-gray-700">
-                <div class="text-gray-400 text-sm font-semibold mb-2">⏱️ UPTIME</div>
-                <div class="text-3xl font-black text-white">99.9%</div>
-                <div class="text-xs text-gray-500 mt-2">Disponibilité</div>
+                <div class="text-gray-400 text-sm font-semibold mb-2">⏱️ SCAN</div>
+                <div class="text-3xl font-black text-white">{SCAN_INTERVAL_MINUTES} min</div>
+                <div class="text-xs text-gray-500 mt-2">Intervalle auto-scan</div>
             </div>
         </div>
 
@@ -1554,6 +1623,32 @@ async def openai_stats():
         'cost_per_request': cost_per_request,
         'model': 'gpt-4o-mini'
     }
+
+
+# ✨ CONFIGURE SCHEDULER ON STARTUP
+@app.on_event("startup")
+async def startup_event():
+    """Start scheduler on app startup"""
+    scheduler.add_job(
+        func=auto_moderate_pending,
+        trigger=IntervalTrigger(minutes=SCAN_INTERVAL_MINUTES),
+        id='auto_moderate_job',
+        name='Auto-moderate pending requests',
+        replace_existing=True
+    )
+    print(f"\n🚀 {'='*60}")
+    print(f"🚀 PLEXSTAFFAI v1.6.0 STARTED")
+    print(f"🚀 Auto-Scan: Every {SCAN_INTERVAL_MINUTES} minute(s)")
+    print(f"🚀 OpenAI: {'✅ Configured' if OPENAI_API_KEY else '❌ Not configured'}")
+    print(f"🚀 TMDB: {'✅ Configured' if TMDB_API_KEY else '⚠️  Optional - not configured'}")
+    print(f"🚀 {'='*60}\n")
+
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Stop scheduler on app shutdown"""
+    scheduler.shutdown()
+    print("\n🛑 Scheduler stopped")
 
 
 if __name__ == "__main__":
