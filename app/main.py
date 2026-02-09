@@ -8,15 +8,11 @@ import sqlite3
 from pathlib import Path
 import json
 
-# ✨ IMPORTS CORRIGÉS - Utilise chemin absolu depuis app/
+# ✨ IMPORTS - Système AI-First
 from app.config_loader import ConfigManager, SmartModerator, ModerationDecision
 from app.ml_feedback import FeedbackDatabase, EnhancedModerator
 from app.openai_moderator import OpenAIModerator
 from app.rules_validator import RulesValidator
-
-# Initialize AI-first system
-openai_moderator = OpenAIModerator() if OPENAI_API_KEY else None
-rules_validator = RulesValidator(config)
 
 app = FastAPI(title="PlexStaffAI", version="1.6.0")
 
@@ -24,12 +20,14 @@ app = FastAPI(title="PlexStaffAI", version="1.6.0")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OVERSEERR_API_URL = os.getenv("OVERSEERR_API_URL", "http://overseerr:5055")
 OVERSEERR_API_KEY = os.getenv("OVERSEERR_API_KEY")
-TMDB_API_KEY = os.getenv("TMDB_API_KEY", "")  # ✨ NOUVEAU: Enrichissement TMDB
+TMDB_API_KEY = os.getenv("TMDB_API_KEY", "")
 
-# ✨ NOUVEAU: Charger config personnalisée + ML
+# ✨ AI-FIRST SYSTEM
 config = ConfigManager("/config/config.yaml")
 feedback_db = FeedbackDatabase("/config/feedback.db")
 moderator = EnhancedModerator(config, feedback_db)
+openai_moderator = OpenAIModerator() if OPENAI_API_KEY else None
+rules_validator = RulesValidator(config)
 
 # Database
 DB_PATH = "/config/moderation.db"
@@ -53,14 +51,14 @@ def init_db():
         )
     """)
     
-    # ✨ Migration: Ajoute colonne si elle n'existe pas
+    # Migration: Ajoute colonne si elle n'existe pas
     try:
         cursor.execute("ALTER TABLE decisions ADD COLUMN request_data JSON")
         print("✅ Added request_data column to decisions table")
     except:
-        pass  # Column already exists
+        pass
     
-    # ✨ NOUVEAU: Pending reviews table
+    # Pending reviews table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS pending_reviews (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -136,7 +134,6 @@ def decline_overseerr_request(request_id: int):
         return False
 
 
-# ✨ NOUVEAU: Enrichissement TMDB
 def enrich_from_tmdb(tmdb_id: int, media_type: str) -> dict:
     """Enrichit les données depuis TMDB API si disponible"""
     if not TMDB_API_KEY:
@@ -144,7 +141,6 @@ def enrich_from_tmdb(tmdb_id: int, media_type: str) -> dict:
         return {}
     
     try:
-        # Endpoint TMDB selon type
         endpoint = f"https://api.themoviedb.org/3/{media_type}/{tmdb_id}"
         
         response = httpx.get(
@@ -184,19 +180,16 @@ def get_title_from_media(media: dict, tmdb_enriched: dict = None) -> str:
         media.get('originalName'),
     ]
     
-    # Ajoute les données TMDB si disponibles
     if tmdb_enriched:
         candidates.extend([
             tmdb_enriched.get('title'),
             tmdb_enriched.get('original_title')
         ])
     
-    # Retourne le premier non-vide
     for candidate in candidates:
         if candidate and candidate.strip():
             return candidate.strip()
     
-    # Fallback TMDB ID
     return f"TMDB-{media.get('tmdbId', 'unknown')}"
 
 
@@ -215,7 +208,7 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
     media_type = media.get('mediaType', 'unknown')
     tmdb_id = media.get('tmdbId')
     
-    # ✨ ENRICHISSEMENT TMDB si données manquantes
+    # ENRICHISSEMENT TMDB si données manquantes
     tmdb_enriched = {}
     needs_enrichment = (
         not media.get('title') and 
@@ -318,7 +311,7 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
             rule_matched = f"ai_primary:{ai_result.get('model_used', 'gpt-4o-mini')}"
         
     else:
-        # Fallback si pas d'OpenAI (ne devrait pas arriver)
+        # Fallback si pas d'OpenAI
         print("⚠️  OpenAI not configured, using rule-based fallback")
         decision_result = moderator.moderate_with_learning(enriched_data)
         decision = decision_result['decision']
@@ -368,6 +361,7 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
         'rule_matched': rule_matched,
         'title': title
     }
+
 
 def save_for_review(request_id: int, request_data: dict, decision_result: dict):
     """Save request for staff review"""
@@ -422,7 +416,6 @@ async def manual_moderate():
         result = moderate_request(req['id'], req)
         results.append(result)
         
-        # Count decisions
         decision = result.get('decision', '')
         if decision == 'APPROVED':
             approved_count += 1
@@ -440,22 +433,18 @@ async def manual_moderate():
     }
 
 
-# ✨ NOUVEAU: Endpoint HTML pour HTMX
 @app.get("/moderate-html", response_class=HTMLResponse)
 async def moderate_html():
     """Endpoint HTML pour HTMX - Modération manuelle"""
     try:
-        # Lance la modération
         result = await manual_moderate()
         
-        # Parse résultat
         approved = result.get('approved', 0)
         rejected = result.get('rejected', 0)
         needs_review = result.get('needs_review', 0)
         total = approved + rejected + needs_review
         details = result.get('details', [])
         
-        # Génère HTML - UTILISE TRIPLES APOSTROPHES
         html = f'''
 <div class="space-y-6">
     <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
@@ -488,7 +477,6 @@ async def moderate_html():
         </h4>
 '''
         
-        # Ajoute les détails
         if details and len(details) > 0:
             for item in details[:20]:
                 title = item.get('title', 'Unknown')
@@ -497,7 +485,6 @@ async def moderate_html():
                 confidence = item.get('confidence', 0) * 100
                 rule = item.get('rule_matched', 'none')
                 
-                # Couleur selon décision
                 if decision == 'APPROVED':
                     color_class = 'bg-emerald-900/30 border-emerald-700'
                     text_class = 'text-emerald-300'
@@ -523,7 +510,7 @@ async def moderate_html():
                 </div>
             </div>
             <div class="text-sm opacity-90 {text_class} mb-1">{reason}</div>
-            <div class="text-xs text-gray-500">Règle: {rule}</div>
+            <div class="text-xs text-gray-500">Path: {rule}</div>
         </div>
 '''
         else:
@@ -536,7 +523,6 @@ async def moderate_html():
         </div>
 '''
         
-        # Ferme le HTML
         html += f'''
     </div>
     
@@ -586,15 +572,13 @@ async def moderate_html():
 
 @app.get("/stats")
 async def stats():
-    """Stats endpoint for dashboard (compatibility with v1.5)"""
+    """Stats endpoint for dashboard"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # Total stats
     cursor.execute("SELECT decision, COUNT(*) FROM decisions GROUP BY decision")
     stats = dict(cursor.fetchall())
     
-    # Last 24h
     yesterday = (datetime.now() - timedelta(days=1)).isoformat()
     cursor.execute(
         "SELECT decision, COUNT(*) FROM decisions WHERE timestamp > ? GROUP BY decision",
@@ -623,11 +607,9 @@ async def moderation_report():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # Total stats
     cursor.execute("SELECT decision, COUNT(*) FROM decisions GROUP BY decision")
     stats = dict(cursor.fetchall())
     
-    # Last 24h
     yesterday = (datetime.now() - timedelta(days=1)).isoformat()
     cursor.execute(
         "SELECT decision, COUNT(*) FROM decisions WHERE timestamp > ? GROUP BY decision",
@@ -635,7 +617,6 @@ async def moderation_report():
     )
     last_24h = dict(cursor.fetchall())
     
-    # Last 7 days
     week_ago = (datetime.now() - timedelta(days=7)).isoformat()
     cursor.execute(
         "SELECT decision, COUNT(*) FROM decisions WHERE timestamp > ? GROUP BY decision",
@@ -643,7 +624,6 @@ async def moderation_report():
     )
     last_7d = dict(cursor.fetchall())
     
-    # Recent decisions
     cursor.execute("""
         SELECT request_id, decision, reason, rule_matched, timestamp 
         FROM decisions 
@@ -652,7 +632,6 @@ async def moderation_report():
     """)
     recent = cursor.fetchall()
     
-    # Rules breakdown
     cursor.execute("""
         SELECT rule_matched, COUNT(*) as count 
         FROM decisions 
@@ -664,7 +643,6 @@ async def moderation_report():
     
     conn.close()
     
-    # Calculate totals
     total = sum(stats.values())
     approved = stats.get('APPROVED', 0)
     rejected = stats.get('REJECTED', 0)
@@ -674,7 +652,6 @@ async def moderation_report():
     total_24h = sum(last_24h.values())
     total_7d = sum(last_7d.values())
     
-    # Génère HTML
     html = f'''
 <!DOCTYPE html>
 <html lang="fr">
@@ -694,7 +671,6 @@ async def moderation_report():
 <body class="bg-gray-900 text-white font-sans antialiased">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         
-        <!-- Header -->
         <header class="mb-12 fade-in">
             <div class="flex items-center justify-between mb-6">
                 <div>
@@ -711,7 +687,6 @@ async def moderation_report():
             </div>
         </header>
 
-        <!-- Overall Stats -->
         <div class="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8 fade-in">
             <div class="bg-gradient-to-br from-gray-800 to-gray-900 p-8 rounded-2xl shadow-2xl border border-gray-700">
                 <div class="text-gray-400 text-sm font-semibold mb-2">📊 TOTAL DÉCISIONS</div>
@@ -738,7 +713,6 @@ async def moderation_report():
             </div>
         </div>
 
-        <!-- Time Period Stats -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8 fade-in">
             <div class="bg-gray-800/50 backdrop-blur-xl p-6 rounded-xl border border-gray-700">
                 <h3 class="text-xl font-bold mb-4 text-purple-400">📈 Taux d'Approbation</h3>
@@ -767,7 +741,6 @@ async def moderation_report():
             </div>
         </div>
 
-        <!-- Rules Breakdown -->
         <div class="bg-gray-800/50 backdrop-blur-xl p-6 rounded-xl border border-gray-700 mb-8 fade-in">
             <h3 class="text-2xl font-bold mb-6 flex items-center">
                 <span class="w-3 h-3 bg-purple-400 rounded-full mr-3 animate-pulse"></span>
@@ -795,7 +768,6 @@ async def moderation_report():
             </div>
         </div>
 
-        <!-- Recent Decisions -->
         <div class="bg-gray-800/50 backdrop-blur-xl p-6 rounded-xl border border-gray-700 fade-in">
             <h3 class="text-2xl font-bold mb-6 flex items-center">
                 <span class="w-3 h-3 bg-blue-400 rounded-full mr-3 animate-pulse"></span>
@@ -831,7 +803,7 @@ async def moderation_report():
                         <div class="text-xs text-gray-500">{timestamp}</div>
                     </div>
                     <div class="text-sm {text_color} opacity-90 mb-1">{reason}</div>
-                    <div class="text-xs text-gray-500">Règle: {rule}</div>
+                    <div class="text-xs text-gray-500">Path: {rule}</div>
                 </div>
         '''
     
@@ -839,7 +811,6 @@ async def moderation_report():
             </div>
         </div>
 
-        <!-- Quick Actions -->
         <div class="mt-8 flex gap-4 justify-center flex-wrap fade-in">
             <a href="/" 
                class="bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded-xl font-bold transition shadow-lg">
@@ -860,7 +831,6 @@ async def moderation_report():
             </button>
         </div>
 
-        <!-- Footer -->
         <footer class="text-center mt-12 text-gray-500 text-sm">
             <p>PlexStaffAI v1.6.0 • Rapport généré le {datetime.now().strftime("%d/%m/%Y à %H:%M")}</p>
         </footer>
@@ -886,7 +856,6 @@ async def history_data(filter: str = "all"):
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # Query avec filtre optionnel
     if filter == "all":
         cursor.execute("""
             SELECT request_id, decision, reason, confidence, rule_matched, timestamp, request_data
@@ -906,7 +875,6 @@ async def history_data(filter: str = "all"):
     rows = cursor.fetchall()
     conn.close()
     
-    # Génère HTML pour HTMX
     if not rows:
         html = '''
         <div class="text-center py-12 bg-gray-800/30 rounded-xl">
@@ -922,7 +890,6 @@ async def history_data(filter: str = "all"):
     for row in rows:
         request_id, decision, reason, confidence, rule_matched, timestamp, request_data_json = row
         
-        # Parse request_data
         request_data = {}
         if request_data_json:
             try:
@@ -930,7 +897,6 @@ async def history_data(filter: str = "all"):
             except:
                 pass
         
-        # Extract metadata
         title = request_data.get('title', f'Request #{request_id}')
         media_type = request_data.get('media_type', 'unknown')
         year = request_data.get('year', '')
@@ -942,7 +908,6 @@ async def history_data(filter: str = "all"):
         user = request_data.get('requested_by', 'Unknown')
         user_age = request_data.get('user_age_days', 0)
         
-        # Couleur selon décision
         if decision == 'APPROVED':
             color = 'bg-emerald-900/30 border-emerald-700'
             text_color = 'text-emerald-300'
@@ -961,15 +926,12 @@ async def history_data(filter: str = "all"):
         
         confidence_pct = int(confidence * 100)
         
-        # Format genres
         genres_str = ', '.join(genres[:3]) if genres else 'N/A'
         if len(genres) > 3:
             genres_str += f' +{len(genres)-3}'
         
-        # Build HTML card
         html += f'''
         <div class="{color} border-2 rounded-2xl p-6 hover:shadow-2xl transition-all hover:scale-[1.02]">
-            <!-- Header -->
             <div class="flex justify-between items-start mb-4">
                 <div class="flex items-center gap-4">
                     <div class="text-5xl">{emoji}</div>
@@ -982,9 +944,7 @@ async def history_data(filter: str = "all"):
         '''
         
         if year:
-            html += f'''
-                            <span class="text-gray-400">📅 {year}</span>
-        '''
+            html += f'<span class="text-gray-400">📅 {year}</span>'
         
         html += f'''
                             <span class="{text_color} font-bold">#{request_id}</span>
@@ -999,7 +959,6 @@ async def history_data(filter: str = "all"):
                 </div>
             </div>
             
-            <!-- Stats Grid -->
             <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-4 bg-gray-900/30 p-4 rounded-xl">
         '''
         
@@ -1038,7 +997,6 @@ async def history_data(filter: str = "all"):
         html += f'''
             </div>
             
-            <!-- Details -->
             <div class="space-y-2 mb-4">
                 <div class="flex items-start gap-2">
                     <span class="text-gray-400 text-sm">📝</span>
@@ -1046,7 +1004,7 @@ async def history_data(filter: str = "all"):
                 </div>
                 <div class="flex items-center gap-2">
                     <span class="text-gray-400 text-sm">🎯</span>
-                    <span class="text-sm text-gray-300">Règle: <span class="font-mono {text_color}">{rule_matched}</span></span>
+                    <span class="text-sm text-gray-300">Path: <span class="font-mono {text_color}">{rule_matched}</span></span>
                 </div>
         '''
         
@@ -1064,15 +1022,12 @@ async def history_data(filter: str = "all"):
         '''
         
         if user_age > 0:
-            html += f'''
-                    <span>👶 Compte: {user_age} jours</span>
-        '''
+            html += f'<span>👶 Compte: {user_age} jours</span>'
         
         html += f'''
                 </div>
             </div>
             
-            <!-- Footer -->
             <div class="flex justify-between items-center pt-4 border-t border-gray-700">
                 <div class="flex items-center gap-2">
                     <div class="w-3 h-3 {text_color.replace('text-', 'bg-')} rounded-full"></div>
@@ -1091,7 +1046,6 @@ async def history_data(filter: str = "all"):
 async def health_check():
     """Beautiful health check page with service status"""
     
-    # Check services
     services = {
         'openai': {
             'name': 'OpenAI API',
@@ -1130,7 +1084,6 @@ async def health_check():
         }
     }
     
-    # Test Overseerr connectivity
     try:
         response = httpx.get(
             f"{OVERSEERR_API_URL}/api/v1/status",
@@ -1145,7 +1098,6 @@ async def health_check():
     except:
         services['overseerr']['status'] = 'error'
     
-    # Check database
     try:
         conn = sqlite3.connect(DB_PATH)
         cursor = conn.cursor()
@@ -1158,16 +1110,13 @@ async def health_check():
     except:
         services['database']['status'] = 'error'
     
-    # Calculate overall status
     critical_services = ['openai', 'overseerr', 'database']
     all_critical_ok = all(services[s]['status'] == 'operational' for s in critical_services)
     overall_status = 'healthy' if all_critical_ok else 'degraded'
     
-    # Count operational services
     operational_count = sum(1 for s in services.values() if s['status'] == 'operational')
     total_count = len(services)
     
-    # Generate HTML - START
     html_parts = []
     
     html_parts.append('''
@@ -1200,7 +1149,6 @@ async def health_check():
 <body class="bg-gray-900 text-white font-sans antialiased">
     <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         
-        <!-- Header -->
         <header class="mb-12 fade-in">
             <div class="flex items-center justify-between mb-6">
                 <div>
@@ -1223,7 +1171,6 @@ async def health_check():
             </div>
         </header>
 
-        <!-- Overall Status Banner -->
         <div class="mb-8 fade-in">
     ''')
     
@@ -1268,15 +1215,12 @@ async def health_check():
     html_parts.append('''
         </div>
 
-        <!-- Services Grid -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-8">
     ''')
     
-    # Generate service cards
     for service_key, service in services.items():
         status = service['status']
         
-        # Status styling
         if status == 'operational':
             status_color = 'bg-green-500'
             status_text = 'text-green-400'
@@ -1340,12 +1284,11 @@ async def health_check():
     html_parts.append(f'''
         </div>
 
-        <!-- System Info -->
         <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8 fade-in">
             <div class="bg-gray-800/50 backdrop-blur-xl p-6 rounded-xl border border-gray-700">
                 <div class="text-gray-400 text-sm font-semibold mb-2">🚀 VERSION</div>
                 <div class="text-3xl font-black text-white">v1.6.0</div>
-                <div class="text-xs text-gray-500 mt-2">PlexStaffAI Dev</div>
+                <div class="text-xs text-gray-500 mt-2">PlexStaffAI AI-First</div>
             </div>
             
             <div class="bg-gray-800/50 backdrop-blur-xl p-6 rounded-xl border border-gray-700">
@@ -1361,7 +1304,6 @@ async def health_check():
             </div>
         </div>
 
-        <!-- API Endpoints -->
         <div class="bg-gray-800/50 backdrop-blur-xl p-6 rounded-xl border border-gray-700 mb-8 fade-in">
             <h3 class="text-2xl font-bold mb-6 flex items-center">
                 <span class="w-3 h-3 bg-blue-400 rounded-full mr-3 animate-pulse"></span>
@@ -1399,7 +1341,6 @@ async def health_check():
             </div>
         </div>
 
-        <!-- Quick Actions -->
         <div class="flex gap-4 justify-center flex-wrap fade-in">
             <a href="/" 
                class="bg-blue-600 hover:bg-blue-700 px-6 py-3 rounded-xl font-bold transition shadow-lg">
@@ -1420,9 +1361,8 @@ async def health_check():
             </button>
         </div>
 
-        <!-- Footer -->
         <footer class="text-center mt-12 text-gray-500 text-sm">
-            <p class="mb-2">🚀 PlexStaffAI v1.6.0 • Monitoring en temps réel</p>
+            <p class="mb-2">🚀 PlexStaffAI v1.6.0 AI-First • Monitoring en temps réel</p>
             <p>Made with ❤️ by <a href="https://github.com/malambert35" class="text-blue-400 hover:text-blue-300">@malambert35</a></p>
         </footer>
 
@@ -1433,10 +1373,6 @@ async def health_check():
     
     return HTMLResponse(content=''.join(html_parts))
 
-
-# ============================================
-# ✨ NOUVEAUX ENDPOINTS v1.6
-# ============================================
 
 @app.get("/review-dashboard", response_class=HTMLResponse)
 async def review_dashboard():
@@ -1481,7 +1417,6 @@ async def approve_review(request_id: int, request: Request):
     body = await request.json() if request.headers.get('content-type') == 'application/json' else {}
     staff_username = body.get('staff', 'admin')
     
-    # Get request data
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute(
@@ -1496,7 +1431,6 @@ async def approve_review(request_id: int, request: Request):
     request_data = json.loads(row[0])
     ai_decision = row[1]
     
-    # Record human feedback for ML
     moderator.record_human_decision(
         request_id=request_id,
         request_data=request_data,
@@ -1506,10 +1440,8 @@ async def approve_review(request_id: int, request: Request):
         staff_username=staff_username
     )
     
-    # Approve in Overseerr
     approve_overseerr_request(request_id)
     
-    # Update status
     cursor.execute(
         "UPDATE pending_reviews SET status = 'approved' WHERE request_id = ?",
         (request_id,)
@@ -1517,7 +1449,6 @@ async def approve_review(request_id: int, request: Request):
     conn.commit()
     conn.close()
     
-    # Save to decisions avec métadonnées
     save_decision(request_id, 'APPROVED', 'Staff approved', 1.0, 'human_review', request_data)
     
     return {'status': 'approved', 'request_id': request_id}
@@ -1530,7 +1461,6 @@ async def reject_review(request_id: int, request: Request):
     staff_username = body.get('staff', 'admin')
     reason = body.get('reason', 'Staff rejected')
     
-    # Get request data
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute(
@@ -1545,7 +1475,6 @@ async def reject_review(request_id: int, request: Request):
     request_data = json.loads(row[0])
     ai_decision = row[1]
     
-    # Record feedback
     moderator.record_human_decision(
         request_id=request_id,
         request_data=request_data,
@@ -1555,10 +1484,8 @@ async def reject_review(request_id: int, request: Request):
         staff_username=staff_username
     )
     
-    # Reject in Overseerr
     decline_overseerr_request(request_id)
     
-    # Update status
     cursor.execute(
         "UPDATE pending_reviews SET status = 'rejected' WHERE request_id = ?",
         (request_id,)
@@ -1566,7 +1493,6 @@ async def reject_review(request_id: int, request: Request):
     conn.commit()
     conn.close()
     
-    # Save avec métadonnées
     save_decision(request_id, 'REJECTED', reason, 1.0, 'human_review', request_data)
     
     return {'status': 'rejected', 'request_id': request_id}
@@ -1594,6 +1520,39 @@ async def ml_stats():
         'unlearned': unlearned,
         'patterns_learned': feedback_count - unlearned,
         'learning_threshold': 100
+    }
+
+
+@app.get("/staff/openai-stats")
+async def openai_stats():
+    """OpenAI usage statistics"""
+    if not openai_moderator:
+        return {'enabled': False, 'message': 'OpenAI not configured'}
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT COUNT(*) FROM decisions 
+        WHERE rule_matched LIKE 'ai_primary:%' OR rule_matched LIKE 'ai_override:%'
+    """)
+    openai_count = cursor.fetchone()[0]
+    
+    cursor.execute("SELECT COUNT(*) FROM decisions")
+    total_count = cursor.fetchone()[0]
+    
+    conn.close()
+    
+    cost_per_request = 0.02
+    
+    return {
+        'enabled': True,
+        'total_ai_decisions': openai_count,
+        'total_decisions': total_count,
+        'ai_usage_rate': round(openai_count / total_count * 100, 1) if total_count > 0 else 0,
+        'estimated_cost_so_far': round(openai_count * cost_per_request, 2),
+        'cost_per_request': cost_per_request,
+        'model': 'gpt-4o-mini'
     }
 
 
