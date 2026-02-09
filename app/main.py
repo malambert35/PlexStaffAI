@@ -190,7 +190,8 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
             'decision': 'NEEDS_REVIEW',
             'reason': reason,
             'confidence': confidence,
-            'action': 'pending_staff_review'
+            'action': 'pending_staff_review',
+            'title': title
         }
     
     # Actions Overseerr (APPROVE/REJECT)
@@ -207,7 +208,8 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
         'decision': decision,
         'reason': reason,
         'confidence': confidence,
-        'rule_matched': rule_matched
+        'rule_matched': rule_matched,
+        'title': title
     }
 
 
@@ -256,14 +258,175 @@ async def manual_moderate():
         return {"message": "No pending requests", "moderated": 0}
     
     results = []
+    approved_count = 0
+    rejected_count = 0
+    needs_review_count = 0
+    
     for req in requests:
         result = moderate_request(req['id'], req)
         results.append(result)
+        
+        # Count decisions
+        decision = result.get('decision', '')
+        if decision == 'APPROVED':
+            approved_count += 1
+        elif decision == 'REJECTED':
+            rejected_count += 1
+        elif decision == 'NEEDS_REVIEW':
+            needs_review_count += 1
     
     return {
         "message": f"Moderated {len(results)} requests",
-        "results": results
+        "approved": approved_count,
+        "rejected": rejected_count,
+        "needs_review": needs_review_count,
+        "details": results
     }
+
+
+@app.get("/moderate-html", response_class=HTMLResponse)
+async def moderate_html():
+    """Endpoint HTML pour HTMX - Modération manuelle"""
+    try:
+        # Lance la modération
+        result = await manual_moderate()
+        
+        # Parse résultat
+        approved = result.get('approved', 0)
+        rejected = result.get('rejected', 0)
+        needs_review = result.get('needs_review', 0)
+        total = approved + rejected + needs_review
+        details = result.get('details', [])
+        
+        # Génère HTML - UTILISE TRIPLES APOSTROPHES
+        html = f'''
+<div class="space-y-6">
+    <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div class="bg-gradient-to-br from-blue-900 to-indigo-900 p-6 rounded-xl border border-blue-700">
+            <div class="text-blue-300 text-sm font-semibold mb-2">📊 Total Traité</div>
+            <div class="text-5xl font-black text-white">{total}</div>
+            <div class="text-xs text-blue-400 mt-2">Requests modérées</div>
+        </div>
+        <div class="bg-gradient-to-br from-emerald-900 to-teal-900 p-6 rounded-xl border border-emerald-700">
+            <div class="text-emerald-300 text-sm font-semibold mb-2">✅ Approuvés</div>
+            <div class="text-5xl font-black text-emerald-300">{approved}</div>
+            <div class="text-xs text-emerald-500 mt-2">Auto-validées</div>
+        </div>
+        <div class="bg-gradient-to-br from-red-900 to-pink-900 p-6 rounded-xl border border-red-700">
+            <div class="text-red-300 text-sm font-semibold mb-2">❌ Rejetés</div>
+            <div class="text-5xl font-black text-red-300">{rejected}</div>
+            <div class="text-xs text-red-500 mt-2">Auto-refusées</div>
+        </div>
+        <div class="bg-gradient-to-br from-yellow-900 to-orange-900 p-6 rounded-xl border border-yellow-700">
+            <div class="text-yellow-300 text-sm font-semibold mb-2">🧑‍⚖️ À Réviser</div>
+            <div class="text-5xl font-black text-yellow-300">{needs_review}</div>
+            <div class="text-xs text-yellow-500 mt-2">Review manuelle</div>
+        </div>
+    </div>
+    
+    <div class="bg-gray-800/50 backdrop-blur-xl p-6 rounded-xl border border-gray-700">
+        <h4 class="text-xl font-bold mb-4 text-white flex items-center">
+            <span class="w-3 h-3 bg-blue-400 rounded-full mr-3 animate-pulse"></span>
+            📋 Détails des Décisions
+        </h4>
+'''
+        
+        # Ajoute les détails
+        if details and len(details) > 0:
+            for item in details[:20]:
+                title = item.get('title', 'Unknown')
+                decision = item.get('decision', 'UNKNOWN')
+                reason = item.get('reason', 'No reason provided')
+                confidence = item.get('confidence', 0) * 100
+                rule = item.get('rule_matched', 'none')
+                
+                # Couleur selon décision
+                if decision == 'APPROVED':
+                    color_class = 'bg-emerald-900/30 border-emerald-700'
+                    text_class = 'text-emerald-300'
+                    emoji = '✅'
+                elif decision == 'REJECTED':
+                    color_class = 'bg-red-900/30 border-red-700'
+                    text_class = 'text-red-300'
+                    emoji = '❌'
+                else:
+                    color_class = 'bg-yellow-900/30 border-yellow-700'
+                    text_class = 'text-yellow-300'
+                    emoji = '🧑‍⚖️'
+                
+                html += f'''
+        <div class="{color_class} p-4 rounded-lg border mb-3">
+            <div class="flex justify-between items-start mb-2">
+                <div class="font-bold text-white flex items-center gap-2">
+                    <span class="text-2xl">{emoji}</span>
+                    <span>{title}</span>
+                </div>
+                <div class="text-xs {text_class} bg-gray-900/50 px-3 py-1 rounded-full">
+                    {confidence:.0f}% confiance
+                </div>
+            </div>
+            <div class="text-sm opacity-90 {text_class} mb-1">{reason}</div>
+            <div class="text-xs text-gray-500">Règle: {rule}</div>
+        </div>
+'''
+        else:
+            html += '''
+        <div class="text-gray-400 text-center py-12">
+            <div class="text-6xl mb-4">✨</div>
+            <div class="text-2xl font-bold mb-2">Aucune requête en attente</div>
+            <div class="text-lg">Tous les contenus ont été modérés !</div>
+            <div class="text-sm text-gray-600 mt-2">Le système scan automatiquement toutes les 15 minutes</div>
+        </div>
+'''
+        
+        # Ferme le HTML
+        html += f'''
+    </div>
+    
+    <div class="flex gap-4 justify-center flex-wrap">
+        <button 
+            hx-get="/stats" 
+            hx-target="#stats-container" 
+            hx-swap="innerHTML"
+            class="bg-emerald-600 hover:bg-emerald-700 px-8 py-3 rounded-xl font-bold text-lg transition shadow-lg">
+            🔄 Rafraîchir Stats
+        </button>
+        <a href="/review-dashboard" 
+           class="bg-yellow-600 hover:bg-yellow-700 px-8 py-3 rounded-xl font-bold text-lg transition shadow-lg inline-block">
+            🧑‍⚖️ Voir Reviews ({needs_review})
+        </a>
+        <a href="/history" 
+           class="bg-purple-600 hover:bg-purple-700 px-8 py-3 rounded-xl font-bold text-lg transition shadow-lg inline-block">
+            📜 Historique
+        </a>
+    </div>
+    
+    <div class="text-center text-gray-500 text-sm mt-4">
+        ⏱️ Modération terminée • Prochaine auto-scan dans 15min
+    </div>
+</div>
+'''
+        
+        return HTMLResponse(content=html)
+        
+    except Exception as e:
+        error_html = f'''
+<div class="bg-red-900/30 border-2 border-red-700 p-8 rounded-xl text-center">
+    <div class="text-6xl mb-4">⚠️</div>
+    <div class="text-red-300 font-bold text-2xl mb-3">Erreur de Modération</div>
+    <div class="text-red-400 text-lg mb-6">{str(e)}</div>
+    <button 
+        hx-get="/moderate-html" 
+        hx-target="#results"
+        hx-swap="innerHTML" 
+        class="bg-red-600 hover:bg-red-700 px-8 py-3 rounded-xl font-bold text-lg transition shadow-lg">
+        🔄 Réessayer
+    </button>
+</div>
+'''
+        return HTMLResponse(content=error_html)
+
+
 
 @app.get("/stats")
 async def stats():
