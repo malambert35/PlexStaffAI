@@ -622,35 +622,102 @@ async def moderation_report():
     }
 
 
-@app.get("/history")
-async def decision_history():
-    """Get last 100 decisions"""
+@app.get("/history", response_class=HTMLResponse)
+async def history_page():
+    """Page HTML historique"""
+    with open("static/history.html", "r") as f:
+        return f.read()
+
+
+@app.get("/api/history")
+async def history_data(filter: str = "all"):
+    """API endpoint pour les données historique (JSON ou HTML)"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    cursor.execute("""
-        SELECT request_id, decision, reason, confidence, rule_matched, timestamp 
-        FROM decisions 
-        ORDER BY timestamp DESC 
-        LIMIT 100
-    """)
+    # Query avec filtre optionnel
+    if filter == "all":
+        cursor.execute("""
+            SELECT request_id, decision, reason, confidence, rule_matched, timestamp 
+            FROM decisions 
+            ORDER BY timestamp DESC 
+            LIMIT 100
+        """)
+    else:
+        cursor.execute("""
+            SELECT request_id, decision, reason, confidence, rule_matched, timestamp 
+            FROM decisions 
+            WHERE decision = ?
+            ORDER BY timestamp DESC 
+            LIMIT 100
+        """, (filter,))
     
     rows = cursor.fetchall()
     conn.close()
     
-    decisions = []
-    for row in rows:
-        decisions.append({
-            'request_id': row[0],
-            'decision': row[1],
-            'reason': row[2],
-            'confidence': row[3],
-            'rule_matched': row[4],
-            'timestamp': row[5]
-        })
+    # Génère HTML pour HTMX
+    if not rows:
+        html = '''
+        <div class="text-center py-12 bg-gray-800/30 rounded-xl">
+            <div class="text-6xl mb-4">📭</div>
+            <div class="text-2xl font-bold mb-2">Aucune décision</div>
+            <div class="text-gray-400">L'historique est vide</div>
+        </div>
+        '''
+        return HTMLResponse(content=html)
     
-    return {"decisions": decisions}
-
+    html = '<div class="space-y-3">'
+    
+    for row in rows:
+        request_id, decision, reason, confidence, rule_matched, timestamp = row
+        
+        # Couleur selon décision
+        if decision == 'APPROVED':
+            color = 'bg-emerald-900/30 border-emerald-700'
+            text_color = 'text-emerald-300'
+            emoji = '✅'
+        elif decision == 'REJECTED':
+            color = 'bg-red-900/30 border-red-700'
+            text_color = 'text-red-300'
+            emoji = '❌'
+        else:
+            color = 'bg-yellow-900/30 border-yellow-700'
+            text_color = 'text-yellow-300'
+            emoji = '🧑‍⚖️'
+        
+        confidence_pct = int(confidence * 100)
+        
+        html += f'''
+        <div class="{color} border rounded-xl p-5 hover:shadow-lg transition">
+            <div class="flex justify-between items-start mb-3">
+                <div class="flex items-center gap-3">
+                    <span class="text-3xl">{emoji}</span>
+                    <div>
+                        <div class="font-bold text-white text-lg">Request #{request_id}</div>
+                        <div class="text-xs {text_color} font-semibold">{decision}</div>
+                    </div>
+                </div>
+                <div class="text-right">
+                    <div class="text-xs {text_color} bg-gray-900/50 px-3 py-1 rounded-full mb-1">
+                        {confidence_pct}% confiance
+                    </div>
+                    <div class="text-xs text-gray-500" data-timestamp="{timestamp}">
+                        {timestamp}
+                    </div>
+                </div>
+            </div>
+            <div class="text-sm {text_color} opacity-90 mb-2">
+                💬 {reason}
+            </div>
+            <div class="text-xs text-gray-500">
+                🎯 Règle: <span class="font-mono">{rule_matched}</span>
+            </div>
+        </div>
+        '''
+    
+    html += '</div>'
+    
+    return HTMLResponse(content=html)
 
 # ============================================
 # ✨ NOUVEAUX ENDPOINTS v1.6
