@@ -53,9 +53,10 @@ const translations = {
         
         // ===== HISTORY PAGE =====
         historyTitle: "Historique des Décisions",
-        historyRequestId: "ID Request",
+        historyRequestId: "ID",                      // 🆕 Changé
+        historyTitleCol: "Titre",                    // 🆕 Ajouté
         historyMedia: "Média",
-        historyUser: "Utilisateur",
+        historyUser: "Utilisateur",                  // 🆕 Ajouté
         historyDecision: "Décision",
         historyReason: "Raison",
         historyConfidence: "Confiance",
@@ -183,9 +184,10 @@ const translations = {
         
         // ===== HISTORY PAGE =====
         historyTitle: "Decision History",
-        historyRequestId: "Request ID",
+        historyRequestId: "ID",                      // 🆕 Changé
+        historyTitleCol: "Title",                    // 🆕 Ajouté
         historyMedia: "Media",
-        historyUser: "User",
+        historyUser: "User",                         // 🆕 Ajouté
         historyDecision: "Decision",
         historyReason: "Reason",
         historyConfidence: "Confidence",
