@@ -38,7 +38,7 @@
 ## 🖼️ Captures d'Écran
 
 ### Dashboard Principal
-![Dashboard](https://via.placeholder.com/800x400?text=Dashboard+PlexStaffAI)
+<img width="930" height="942" alt="image" src="https://github.com/user-attachments/assets/13ba53cb-a1b5-4ff8-bc7e-0777aa19bc63" />
 
 ### Review Dashboard
 ![Review](https://via.placeholder.com/800x400?text=Review+Dashboard)
