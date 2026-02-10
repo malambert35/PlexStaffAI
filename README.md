@@ -41,10 +41,13 @@
 <img width="930" height="942" alt="image" src="https://github.com/user-attachments/assets/13ba53cb-a1b5-4ff8-bc7e-0777aa19bc63" />
 
 ### Review Dashboard
-![Review](https://via.placeholder.com/800x400?text=Review+Dashboard)
+<img width="926" height="399" alt="image" src="https://github.com/user-attachments/assets/f329a6bc-696a-419b-bc04-b31d263dd0dd" />
+
+### Etat système
+<img width="616" height="466" alt="image" src="https://github.com/user-attachments/assets/7c480bac-3b2f-41cb-b136-08f631442fea" />
 
 ### Statistiques OpenAI
-![Stats](https://via.placeholder.com/800x400?text=OpenAI+Statistics)
+<img width="877" height="508" alt="image" src="https://github.com/user-attachments/assets/a9a1da4d-3bd2-428d-9d86-7fccca965bbd" />
 
 ---
 
