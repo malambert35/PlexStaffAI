@@ -4,8 +4,52 @@ from app.config_loader import ConfigManager, ModerationDecision
 class RulesValidator:
     """Validates and potentially overrides AI decisions based on strict rules"""
     
+    # Mapping FR → EN pour normalisation des genres
+    GENRE_MAPPING = {
+        # Français → Anglais
+        "Documentaire": "Documentary",
+        "Action & Adventure": "Action",
+        "Action & Aventure": "Action",
+        "Science-Fiction": "Science Fiction",
+        "Fantastique": "Fantasy",
+        "Comédie": "Comedy",
+        "Drame": "Drama",
+        "Horreur": "Horror",
+        "Thriller": "Thriller",
+        "Romance": "Romance",
+        "Crime": "Crime",
+        "Mystère": "Mystery",
+        "Animation": "Animation",
+        "Familial": "Family",
+        "Famille": "Family",
+        "Guerre": "War",
+        "Western": "Western",
+        "Aventure": "Adventure",
+        "Historique": "History",
+        "Biographie": "Biography",
+        "Musique": "Music",
+        "Musical": "Musical",
+    }
+    
     def __init__(self, config: ConfigManager):
         self.config = config
+    
+    def normalize_genres(self, genres: List[str]) -> List[str]:
+        """
+        Normalise les genres FR → EN pour comparaison uniforme
+        
+        Args:
+            genres: Liste des genres (possiblement en français)
+            
+        Returns:
+            Liste des genres normalisés en anglais
+        """
+        normalized = []
+        for genre in genres:
+            # Essayer de mapper FR → EN
+            normalized_genre = self.GENRE_MAPPING.get(genre, genre)
+            normalized.append(normalized_genre)
+        return normalized
     
     def validate(self, ai_result: Dict, request_data: Dict) -> Dict:
         """
@@ -30,10 +74,15 @@ class RulesValidator:
         # Extract data
         rating = request_data.get('rating', 0)
         popularity = request_data.get('popularity', 0)
-        genres = request_data.get('genres', [])
+        genres_raw = request_data.get('genres', [])
         episodes = request_data.get('episode_count', 0)
         seasons = request_data.get('season_count', 0)
         user_age_days = request_data.get('user_age_days', 0)
+        
+        # 🆕 NORMALISER LES GENRES FR → EN
+        genres = self.normalize_genres(genres_raw)
+        if genres != genres_raw:
+            print(f"🌍 Genre normalization: {genres_raw} → {genres}")
         
         # Résultats
         final_decision = ai_decision
@@ -70,22 +119,23 @@ class RulesValidator:
                 final_confidence = min(1.0, final_confidence + 0.1)
                 print(f"✅ Rule rating_above: Supports AI decision (+10% confidence)")
         
-        # Rule: Genre whitelist
+        # Rule: Genre whitelist (🆕 avec genres normalisés)
         genre_whitelist = auto_approve.get('genres', [])
-        if any(g in genres for g in genre_whitelist):
-            matched_genres = [g for g in genres if g in genre_whitelist]
+        matched_approved_genres = [g for g in genres if g in genre_whitelist]
+        
+        if matched_approved_genres:
             rules_matched.append('auto_approve.genres')
             if ai_decision != 'APPROVED':
                 rule_override = True
                 final_decision = 'APPROVED'
                 final_confidence = 0.90
-                override_reason = f"OVERRIDE: Genre {matched_genres} is whitelisted"
+                override_reason = f"OVERRIDE: Genre {matched_approved_genres} is whitelisted (auto-approve)"
                 print(f"⚠️  {override_reason}")
             else:
                 confidence_adjustments.append({
                     'rule': 'whitelisted_genre',
                     'adjustment': +0.05,
-                    'reason': f'Preferred genre: {matched_genres}'
+                    'reason': f'Preferred genre: {matched_approved_genres}'
                 })
                 final_confidence = min(1.0, final_confidence + 0.05)
                 print(f"✅ Rule genres: Supports AI decision (+5% confidence)")
@@ -111,22 +161,23 @@ class RulesValidator:
                 final_confidence = min(1.0, final_confidence + 0.1)
                 print(f"✅ Rule rating_below: Supports AI decision (+10% confidence)")
         
-        # Rule: Blacklisted genres
+        # Rule: Blacklisted genres (🆕 avec genres normalisés)
         genre_blacklist = auto_reject.get('genres', [])
-        if any(g in genres for g in genre_blacklist):
-            matched_genres = [g for g in genres if g in genre_blacklist]
+        matched_blacklisted_genres = [g for g in genres if g in genre_blacklist]
+        
+        if matched_blacklisted_genres:
             rules_matched.append('auto_reject.genres')
             if ai_decision != 'REJECTED':
                 rule_override = True
                 final_decision = 'REJECTED'
                 final_confidence = 0.95
-                override_reason = f"OVERRIDE: Genre {matched_genres} is blacklisted"
+                override_reason = f"OVERRIDE: Genre {matched_blacklisted_genres} is blacklisted (auto-reject)"
                 print(f"⚠️  {override_reason}")
             else:
                 confidence_adjustments.append({
                     'rule': 'blacklisted_genre',
                     'adjustment': +0.1,
-                    'reason': f'Blacklisted genre: {matched_genres}'
+                    'reason': f'Blacklisted genre: {matched_blacklisted_genres}'
                 })
                 final_confidence = min(1.0, final_confidence + 0.1)
                 print(f"✅ Rule genres: Supports AI decision (+10% confidence)")
