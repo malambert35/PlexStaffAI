@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title data-i18n="reviewTitle">PlexStaffAI - Review Dashboard</title>
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
+    <style>
+        .lang-selector {
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            z-index: 100;
+            display: flex;
+            gap: 8px;
+            background: rgba(31, 41, 55, 0.95);
+            backdrop-filter: blur(10px);
+            padding: 8px;
+            border-radius: 12px;
+            border: 1px solid rgba(75, 85, 99, 0.5);
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        }
+        .lang-btn {
+            padding: 8px 16px;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 14px;
+            cursor: pointer;
+            transition: all 0.2s;
+            border: 1px solid transparent;
+            background: transparent;
+            color: #9CA3AF;
+        }
+        .lang-btn:hover {
+            background: rgba(75, 85, 99, 0.5);
+            color: #E5E7EB;
+        }
+        .lang-btn.active {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-color: rgba(102, 126, 234, 0.5);
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+        }
+        .toast {
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            padding: 16px 24px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+            z-index: 1000;
+            animation: slideIn 0.3s ease-out;
+        }
+        @keyframes slideIn {
+            from { transform: translateX(400px); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+        .toast-success { background: #10b981; color: white; }
+        .toast-error { background: #ef4444; color: white; }
+    </style>
+</head>
+<body class="bg-gray-900 text-gray-100">
+
+    <!-- Language Selector -->
+    <div class="lang-selector">
+        <button class="lang-btn active" data-lang="fr" onclick="setLanguage('fr')">
+            <span class="flag">🇫🇷</span> FR
+        </button>
+        <button class="lang-btn" data-lang="en" onclick="setLanguage('en')">
+            <span class="flag">🇬🇧</span> EN
+        </button>
+    </div>
+
+    <header class="bg-gray-800 border-b border-gray-700 p-4">
+        <div class="container mx-auto flex justify-between items-center">
+            <h1 class="text-2xl font-bold text-blue-400">
+                🧑‍⚖️ <span data-i18n="reviewTitle">PlexStaffAI Review Dashboard</span>
+            </h1>
+            <div class="flex gap-4">
+                <span class="bg-yellow-600 px-3 py-1 rounded text-sm font-medium">
+                    <span id="pending-count">0</span> <span data-i18n="reviewPending">Pending Reviews</span>
+                </span>
+                <a href="/" class="bg-gray-700 px-3 py-1 rounded text-sm hover:bg-gray-600">
+                    <span data-i18n="backToDashboard">← Back to Main</span>
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <main class="container mx-auto p-6">
+
+        <div class="bg-gray-800 rounded-lg border border-gray-700 p-6 mb-6">
+            <h2 class="text-xl font-bold mb-4" data-i18n="reviewPending">Pending Reviews</h2>
+            <div id="reviews-list">
+                <p class="text-gray-400">Loading...</p>
+            </div>
+        </div>
+
+        <div id="empty-state" class="hidden text-center py-16">
+            <div class="text-6xl mb-4">🎉</div>
+            <h3 class="text-2xl font-bold text-gray-300 mb-2" data-i18n="reviewNoPending">No Pending Reviews!</h3>
+            <p class="text-gray-500">All requests have been processed.</p>
+        </div>
+
+    </main>
+
+    <script src="/static/translations.js"></script>
+    <script>
+        // Load pending reviews
+        async function loadReviews() {
+            try {
+                const response = await fetch('/staff/reviews');
+                const data = await response.json();
+                const reviews = data.reviews || [];
+
+                document.getElementById('pending-count').textContent = reviews.length;
+
+                if (reviews.length === 0) {
+                    document.getElementById('reviews-list').classList.add('hidden');
+                    document.getElementById('empty-state').classList.remove('hidden');
+                    return;
+                }
+
+                document.getElementById('reviews-list').classList.remove('hidden');
+                document.getElementById('empty-state').classList.add('hidden');
+
+                const html = reviews.map(review => {
+                    // Parse request_data if it's a JSON string
+                    let requestData = review.request_data;
+                    if (typeof requestData === 'string') {
+                        try {
+                            requestData = JSON.parse(requestData);
+                        } catch (e) {
+                            requestData = {};
+                        }
+                    }
+
+                    const title = review.title || requestData.title || `Request #${review.request_id}`;
+                    const username = review.username || requestData.requested_by || 'Unknown';
+                    const mediaType = review.media_type || requestData.media_type || 'unknown';
+                    const year = requestData.year || '';
+
+                    return `
+                        <div class="bg-gray-700 rounded-lg p-4 mb-4 border border-gray-600 hover:border-gray-500 transition">
+                            <div class="flex justify-between items-start">
+                                <div class="flex-1">
+                                    <div class="flex items-center gap-3 mb-2">
+                                        <h3 class="text-lg font-bold text-white">${title}</h3>
+                                        <span class="px-2 py-1 bg-blue-900/50 text-blue-300 rounded text-xs">${mediaType}</span>
+                                        ${year ? `<span class="text-gray-400 text-sm">${year}</span>` : ''}
+                                    </div>
+                                    <div class="flex items-center gap-2 mb-3">
+                                        <span class="text-gray-400 text-sm">👤</span>
+                                        <span class="text-gray-300 text-sm font-medium">${username}</span>
+                                        <span class="text-gray-600">•</span>
+                                        <span class="text-gray-500 text-xs">Request #${review.request_id}</span>
+                                    </div>
+                                    <div class="bg-yellow-900/30 border border-yellow-700/50 rounded-lg p-3 mb-2">
+                                        <p class="text-sm text-yellow-300">⚠️ <strong>AI Reason:</strong> ${review.ai_reason || 'No reason provided'}</p>
+                                        <p class="text-xs text-yellow-400 mt-1">Confidence: ${Math.round((review.ai_confidence || 0) * 100)}%</p>
+                                    </div>
+                                </div>
+                                <div class="flex gap-2 ml-4">
+                                    <button onclick="approveReview(${review.id})" 
+                                        class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded font-medium transition whitespace-nowrap">
+                                        ✅ <span data-i18n="reviewApprove">Approve</span>
+                                    </button>
+                                    <button onclick="rejectReview(${review.id})" 
+                                        class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded font-medium transition whitespace-nowrap">
+                                        ❌ <span data-i18n="reviewReject">Reject</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+                document.getElementById('reviews-list').innerHTML = html;
+
+            } catch (error) {
+                console.error('Error loading reviews:', error);
+                showToast('❌ Error loading reviews', 'error');
+            }
+        }
+
+        async function approveReview(reviewId) {
+            try {
+                showToast('⏳ Processing...', 'info');
+
+                const response = await fetch(`/staff/review/${reviewId}/approve`, { 
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showToast('✅ ' + (result.message || 'Approved successfully'), 'success');
+                    setTimeout(loadReviews, 500);
+                } else {
+                    showToast('❌ ' + (result.error || 'Failed to approve'), 'error');
+                    console.error('Approval error:', result);
+                }
+            } catch (error) {
+                showToast('❌ Network error', 'error');
+                console.error('Network error:', error);
+            }
+        }
+
+        async function rejectReview(reviewId) {
+            try {
+                showToast('⏳ Processing...', 'info');
+
+                const response = await fetch(`/staff/review/${reviewId}/reject`, { 
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'}
+                });
+
+                const result = await response.json();
+
+                if (result.success) {
+                    showToast('❌ ' + (result.message || 'Rejected successfully'), 'success');
+                    setTimeout(loadReviews, 500);
+                } else {
+                    showToast('❌ ' + (result.error || 'Failed to reject'), 'error');
+                    console.error('Rejection error:', result);
+                }
+            } catch (error) {
+                showToast('❌ Network error', 'error');
+                console.error('Network error:', error);
+            }
+        }
+
+        function showToast(message, type) {
+            // Remove existing toasts
+            document.querySelectorAll('.toast').forEach(t => t.remove());
+
+            const toast = document.createElement('div');
+            toast.className = `toast toast-${type}`;
+            toast.textContent = message;
+            document.body.appendChild(toast);
+
+            setTimeout(() => toast.remove(), 3000);
+        }
+
+        // Load on page load
+        loadReviews();
+
+        // Auto-refresh every 30s
+        setInterval(loadReviews, 30000);
+    </script>
+
+</body>
+</html>
