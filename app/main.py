@@ -173,35 +173,122 @@ def get_overseerr_requests():
         return []
 
 
-def approve_overseerr_request(request_id: int):
-    """Approve request in Overseerr"""
+def approve_overseerr_request(request_id: int) -> bool:
+    """Approve request in Overseerr with 404 handling"""
     try:
         response = httpx.post(
-            f"{OVERSEERR_API_URL}/api/v1/request/{request_id}/approve",
+            f"{OVERSEERR_URL}/api/v1/request/{request_id}/approve",
             headers={"X-Api-Key": OVERSEERR_API_KEY},
-            timeout=10.0
+            timeout=30.0
         )
+        
+        # 🆕 Si 404, la requête n'existe plus (déjà traitée ou supprimée)
+        if response.status_code == 404:
+            print(f"⚠️  Request {request_id} not found in Overseerr (already processed or deleted)")
+            return True  # ✅ Considère comme succès
+        
         response.raise_for_status()
+        print(f"✅ Approved request {request_id} in Overseerr")
         return True
+        
+    except httpx.HTTPStatusError as e:
+        # 🆕 Gérer 404 aussi dans les exceptions
+        if e.response.status_code == 404:
+            print(f"⚠️  Request {request_id} not found in Overseerr")
+            return True  # ✅ Considère comme succès
+        print(f"❌ Error approving request {request_id}: {e}")
+        return False
     except Exception as e:
-        print(f"Error approving request {request_id}: {e}")
+        print(f"❌ Error approving request {request_id}: {e}")
         return False
 
 
-def decline_overseerr_request(request_id: int):
-    """Decline request in Overseerr"""
+def decline_overseerr_request(request_id: int) -> bool:
+    """Decline request in Overseerr with 404 handling"""
     try:
         response = httpx.post(
-            f"{OVERSEERR_API_URL}/api/v1/request/{request_id}/decline",
+            f"{OVERSEERR_URL}/api/v1/request/{request_id}/decline",
             headers={"X-Api-Key": OVERSEERR_API_KEY},
-            timeout=10.0
+            timeout=30.0
         )
+        
+        # 🆕 Si 404, la requête n'existe plus
+        if response.status_code == 404:
+            print(f"⚠️  Request {request_id} not found in Overseerr (already processed or deleted)")
+            return True  # ✅ Considère comme succès
+        
         response.raise_for_status()
+        print(f"❌ Declined request {request_id} in Overseerr")
         return True
+        
+    except httpx.HTTPStatusError as e:
+        if e.response.status_code == 404:
+            print(f"⚠️  Request {request_id} not found in Overseerr")
+            return True  # ✅ Considère comme succès
+        print(f"❌ Error declining request {request_id}: {e}")
+        return False
     except Exception as e:
-        print(f"Error declining request {request_id}: {e}")
+        print(f"❌ Error declining request {request_id}: {e}")
         return False
 
+def cleanup_stale_reviews():
+    """Remove reviews for requests that no longer exist in Overseerr"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    cursor.execute("""
+        SELECT id, request_id, title
+        FROM pending_reviews 
+        WHERE status = 'pending'
+    """)
+    
+    reviews = cursor.fetchall()
+    removed = 0
+    
+    for review_id, request_id, title in reviews:
+        # Vérifie si la requête existe dans Overseerr
+        try:
+            response = httpx.get(
+                f"{OVERSEERR_URL}/api/v1/request/{request_id}",
+                headers={"X-Api-Key": OVERSEERR_API_KEY},
+                timeout=10.0
+            )
+            
+            if response.status_code == 404:
+                # Requête n'existe plus, supprimer la review
+                cursor.execute("""
+                    UPDATE pending_reviews 
+                    SET status = 'stale' 
+                    WHERE id = ?
+                """, (review_id,))
+                removed += 1
+                print(f"🗑️  Removed stale review #{review_id}: {title} (request {request_id} no longer exists)")
+                
+        except Exception as e:
+            print(f"⚠️  Error checking request {request_id}: {e}")
+    
+    conn.commit()
+    conn.close()
+    
+    if removed > 0:
+        print(f"🧹 Cleaned up {removed} stale review(s)")
+    
+    return removed
+
+# Endpoint pour nettoyer manuellement
+@app.get("/staff/cleanup-reviews")
+async def cleanup_reviews_endpoint():
+    """Cleanup stale reviews (requests no longer in Overseerr)"""
+    removed = cleanup_stale_reviews()
+    return {"removed": removed, "message": f"Cleaned up {removed} stale reviews"}
+
+
+# Appeler automatiquement au démarrage
+@app.on_event("startup")
+async def startup_cleanup():
+    """Cleanup stale reviews on startup"""
+    print("🧹 Cleaning up stale reviews...")
+    cleanup_stale_reviews()
 
 def enrich_from_tmdb(tmdb_id: int, media_type: str) -> dict:
     """Enrichit les données depuis TMDB API si disponible"""
