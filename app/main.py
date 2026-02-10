@@ -927,7 +927,16 @@ async def history_html():
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     cursor.execute("""
-        SELECT id, request_id, decision, reason, confidence, timestamp 
+        SELECT 
+            id, 
+            request_id, 
+            title,           -- 🆕
+            username,        -- 🆕
+            media_type,      -- 🆕
+            decision, 
+            reason, 
+            confidence, 
+            timestamp 
         FROM decisions 
         ORDER BY timestamp DESC 
         LIMIT 50
@@ -937,19 +946,44 @@ async def history_html():
     
     rows_html = ""
     for row in decisions:
+        # 🆕 Extraction des nouvelles colonnes
+        request_id = row[1]
+        title = row[2] or f"Request #{request_id}"
+        username = row[3] or "Unknown"
+        media_type = row[4] or "unknown"
+        decision = row[5]
+        reason = row[6]
+        confidence = row[7]
+        timestamp = row[8]
+        
         decision_badge = {
             'APPROVED': '<span class="px-3 py-1 bg-emerald-500 text-white rounded-full text-sm">✅ Approved</span>',
             'REJECTED': '<span class="px-3 py-1 bg-red-500 text-white rounded-full text-sm">❌ Rejected</span>',
             'NEEDS_REVIEW': '<span class="px-3 py-1 bg-yellow-500 text-black rounded-full text-sm">⚠️ Review</span>'
-        }.get(row[2], row[2])
+        }.get(decision, decision)
+        
+        # 🆕 Badge pour le type de média
+        media_badge = f'<span class="px-2 py-1 bg-blue-900/50 text-blue-300 rounded text-xs">{media_type}</span>'
         
         rows_html += f"""
         <tr class="border-b border-gray-700 hover:bg-gray-700/30 transition">
-            <td class="px-4 py-3">{row[1]}</td>
+            <td class="px-4 py-3">
+                <div class="font-bold text-white">#{request_id}</div>
+            </td>
+            <td class="px-4 py-3">
+                <div class="font-semibold text-white mb-1">{title}</div>
+                {media_badge}
+            </td>
+            <td class="px-4 py-3">
+                <div class="flex items-center gap-2">
+                    <span class="text-gray-400">👤</span>
+                    <span class="text-gray-300">{username}</span>
+                </div>
+            </td>
             <td class="px-4 py-3">{decision_badge}</td>
-            <td class="px-4 py-3 text-sm text-gray-400">{row[3][:100]}...</td>
-            <td class="px-4 py-3 text-center">{int(row[4]*100)}%</td>
-            <td class="px-4 py-3 text-sm">{row[5]}</td>
+            <td class="px-4 py-3 text-sm text-gray-400">{reason[:80]}...</td>
+            <td class="px-4 py-3 text-center">{int(confidence*100)}%</td>
+            <td class="px-4 py-3 text-sm text-gray-500">{timestamp}</td>
         </tr>
         """
     
@@ -1031,7 +1065,9 @@ async def history_html():
                 <table class="w-full">
                     <thead class="bg-gray-700/50">
                         <tr>
-                            <th class="px-4 py-3 text-left" data-i18n="historyRequestId">ID Request</th>
+                            <th class="px-4 py-3 text-left" data-i18n="historyRequestId">ID</th>
+                            <th class="px-4 py-3 text-left" data-i18n="historyTitle">Titre</th>
+                            <th class="px-4 py-3 text-left" data-i18n="historyUser">Utilisateur</th>
                             <th class="px-4 py-3 text-left" data-i18n="historyDecision">Décision</th>
                             <th class="px-4 py-3 text-left" data-i18n="historyReason">Raison</th>
                             <th class="px-4 py-3 text-center" data-i18n="historyConfidence">Confiance</th>
@@ -1039,7 +1075,7 @@ async def history_html():
                         </tr>
                     </thead>
                     <tbody>
-                        {rows_html if rows_html else '<tr><td colspan="5" class="text-center py-8 text-gray-400" data-i18n="historyNoDecisions">Aucune décision enregistrée</td></tr>'}
+                        {rows_html if rows_html else '<tr><td colspan="7" class="text-center py-8 text-gray-400" data-i18n="historyNoDecisions">Aucune décision enregistrée</td></tr>'}
                     </tbody>
                 </table>
             </div>
