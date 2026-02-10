@@ -54,6 +54,9 @@ def init_db():
         CREATE TABLE IF NOT EXISTS decisions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             request_id INTEGER,
+            title TEXT,                          -- 🆕 AJOUTÉ
+            username TEXT,                       -- 🆕 AJOUTÉ
+            media_type TEXT,                     -- 🆕 AJOUTÉ (movie/tv)
             decision TEXT,
             reason TEXT,
             confidence REAL DEFAULT 1.0,
@@ -63,18 +66,46 @@ def init_db():
         )
     """)
     
-    # Migration: Ajoute colonne si elle n'existe pas
-    try:
-        cursor.execute("ALTER TABLE decisions ADD COLUMN request_data JSON")
-        print("✅ Added request_data column to decisions table")
-    except:
-        pass
+    # Migration: Ajoute colonnes si elles n'existent pas
+    cursor.execute("PRAGMA table_info(decisions)")
+    existing_columns = [col[1] for col in cursor.fetchall()]
+    
+    if 'request_data' not in existing_columns:
+        try:
+            cursor.execute("ALTER TABLE decisions ADD COLUMN request_data JSON")
+            print("✅ Added request_data column to decisions table")
+        except:
+            pass
+    
+    if 'title' not in existing_columns:
+        try:
+            cursor.execute("ALTER TABLE decisions ADD COLUMN title TEXT")
+            print("✅ Added title column to decisions table")
+        except:
+            pass
+    
+    if 'username' not in existing_columns:
+        try:
+            cursor.execute("ALTER TABLE decisions ADD COLUMN username TEXT")
+            print("✅ Added username column to decisions table")
+        except:
+            pass
+    
+    if 'media_type' not in existing_columns:
+        try:
+            cursor.execute("ALTER TABLE decisions ADD COLUMN media_type TEXT")
+            print("✅ Added media_type column to decisions table")
+        except:
+            pass
     
     # Pending reviews table
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS pending_reviews (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             request_id INTEGER UNIQUE,
+            title TEXT,                          -- 🆕 AJOUTÉ
+            username TEXT,                       -- 🆕 AJOUTÉ
+            media_type TEXT,                     -- 🆕 AJOUTÉ
             request_data JSON,
             ai_decision TEXT,
             ai_reason TEXT,
@@ -84,8 +115,34 @@ def init_db():
         )
     """)
     
+    # Migration pour pending_reviews
+    cursor.execute("PRAGMA table_info(pending_reviews)")
+    existing_columns_pr = [col[1] for col in cursor.fetchall()]
+    
+    if 'title' not in existing_columns_pr:
+        try:
+            cursor.execute("ALTER TABLE pending_reviews ADD COLUMN title TEXT")
+            print("✅ Added title column to pending_reviews table")
+        except:
+            pass
+    
+    if 'username' not in existing_columns_pr:
+        try:
+            cursor.execute("ALTER TABLE pending_reviews ADD COLUMN username TEXT")
+            print("✅ Added username column to pending_reviews table")
+        except:
+            pass
+    
+    if 'media_type' not in existing_columns_pr:
+        try:
+            cursor.execute("ALTER TABLE pending_reviews ADD COLUMN media_type TEXT")
+            print("✅ Added media_type column to pending_reviews table")
+        except:
+            pass
+    
     conn.commit()
     conn.close()
+
 
 init_db()
 
