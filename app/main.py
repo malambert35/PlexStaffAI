@@ -264,12 +264,12 @@ def get_title_from_media(media: dict, tmdb_enriched: dict = None) -> str:
 
 def moderate_request(request_id: int, request_data: dict) -> dict:
     """
-    AI-FIRST Moderation with Rules Validation
+    RULES-FIRST Moderation with AI Fallback
     
     Workflow:
-    1. OpenAI fait l'analyse primaire (raisonnement complet)
-    2. Rules valident/ajustent/override la décision AI
-    3. Décision finale basée sur AI + Rules combined
+    1. Rules validation FIRST (genres whitelist/blacklist, ratings strictes)
+    2. Si règle stricte match → Skip OpenAI (économise tokens)
+    3. Sinon → OpenAI analyse + Rules ajustements
     """
     
     # Extract metadata from Overseerr
@@ -277,7 +277,7 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
     media_type = media.get('mediaType', 'unknown')
     tmdb_id = media.get('tmdbId')
     
-    # 🆕 EXTRAIRE USERNAME DÈS LE DÉBUT
+    # EXTRAIRE USERNAME DÈS LE DÉBUT
     requested_by_obj = request_data.get('requestedBy', {})
     username = requested_by_obj.get('displayName') or \
                requested_by_obj.get('username') or \
@@ -301,8 +301,6 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
     # Extraction avec fallback TMDB
     title = get_title_from_media(media, tmdb_enriched)
     year = tmdb_enriched.get('year') or (media.get('releaseDate', '')[:4] if media.get('releaseDate') else '')
-    
-    # 🆕 CHANGÉ: utilise la variable username définie plus haut
     requested_by = username
     
     # EXTRACTION ROBUSTE DES COUNTS
@@ -333,7 +331,7 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
     print(f"📊 TMDB ID: {tmdb_id}")
     print(f"📺 Type: {media_type}")
     print(f"📅 Year: {year}")
-    print(f"👤 User: {requested_by} (ID: {user_id}")
+    print(f"👤 User: {requested_by} (ID: {user_id})")
     if tmdb_enriched:
         print(f"🌐 Data source: TMDB API enrichment ✅")
     else:
@@ -371,11 +369,88 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
         except:
             enriched_data['user_age_days'] = 999
     
-    # ✨✨✨ NIVEAU 1: OPENAI PRIMARY ANALYSIS ✨✨✨
+    # 🆕 ✨✨✨ NIVEAU 1: RULES PRE-CHECK (AVANT OpenAI) ✨✨✨
+    print(f"\n🎯 {'='*60}")
+    print(f"🎯 PRE-VALIDATION: Checking strict rules FIRST")
+    print(f"🎯 {'='*60}")
+    
+    # Créer un fake AI result pour pre-check
+    fake_ai_result = {
+        'decision': 'PENDING',
+        'confidence': 0.5,
+        'reason': 'Pre-validation check'
+    }
+    
+    # Valider avec les rules
+    pre_validation = rules_validator.validate(fake_ai_result, enriched_data)
+    
+    # Si règle stricte a matché → Skip OpenAI
+    if pre_validation['rule_override']:
+        decision = pre_validation['final_decision']
+        confidence = pre_validation['final_confidence']
+        reason = pre_validation['final_reason']
+        rule_matched = f"rule_strict:{','.join(pre_validation['rules_matched'][:2])}"
+        
+        print(f"⚡ FAST PATH: Strict rule override, skipping OpenAI")
+        print(f"⚡ Decision: {decision} ({confidence:.1%})")
+        
+        # LOG FINAL DECISION
+        emoji = '✅' if decision == 'APPROVED' else '❌' if decision == 'REJECTED' else '🧑‍⚖️'
+        print(f"\n{emoji} {'='*60}")
+        print(f"{emoji} FINAL DECISION: {decision}")
+        print(f"📝 Reason: {reason}")
+        print(f"🎯 Path: {rule_matched}")
+        print(f"💯 Confidence: {confidence:.1%}")
+        print(f"💰 OpenAI Cost: $0.00 (skipped)")
+        print(f"{emoji} {'='*60}\n")
+        
+        # GESTION NEEDS_REVIEW
+        if decision == 'NEEDS_REVIEW':
+            save_for_review(request_id, enriched_data, {
+                'decision': decision,
+                'reason': reason,
+                'confidence': confidence,
+                'rule_matched': rule_matched
+            }, title=title, username=username, media_type=media_type)
+            
+            return {
+                'decision': 'NEEDS_REVIEW',
+                'reason': reason,
+                'confidence': confidence,
+                'action': 'pending_staff_review',
+                'title': title,
+                'username': username,
+                'media_type': media_type
+            }
+        
+        # Actions Overseerr
+        if decision == 'APPROVED':
+            approve_overseerr_request(request_id)
+        elif decision == 'REJECTED':
+            decline_overseerr_request(request_id)
+        
+        # Save to database
+        save_decision(request_id, decision, reason, confidence, rule_matched, 
+                      enriched_data, title=title, username=username, media_type=media_type)
+        
+        return {
+            'request_id': request_id,
+            'decision': decision,
+            'reason': reason,
+            'confidence': confidence,
+            'rule_matched': rule_matched,
+            'title': title,
+            'username': username,
+            'media_type': media_type
+        }
+    
+    print(f"⚡ No strict rule match, consulting OpenAI...")
+    
+    # 🆕 ✨✨✨ NIVEAU 2: OPENAI ANALYSIS (si pas de rule stricte) ✨✨✨
     if openai_moderator:
         ai_result = openai_moderator.moderate(enriched_data)
         
-        # ✨✨✨ NIVEAU 2: RULES VALIDATION ✨✨✨
+        # ✨✨✨ NIVEAU 3: RULES VALIDATION (ajustements) ✨✨✨
         validation_result = rules_validator.validate(ai_result, enriched_data)
         
         decision = validation_result['final_decision']
@@ -408,13 +483,12 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
     
     # GESTION NEEDS_REVIEW
     if decision == 'NEEDS_REVIEW':
-        # 🆕 PASSER title, username, media_type
         save_for_review(request_id, enriched_data, {
             'decision': decision,
             'reason': reason,
             'confidence': confidence,
             'rule_matched': rule_matched
-        }, title=title, username=username, media_type=media_type)  # 🆕
+        }, title=title, username=username, media_type=media_type)
         
         return {
             'decision': 'NEEDS_REVIEW',
@@ -422,8 +496,8 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
             'confidence': confidence,
             'action': 'pending_staff_review',
             'title': title,
-            'username': username,      # 🆕
-            'media_type': media_type   # 🆕
+            'username': username,
+            'media_type': media_type
         }
     
     # Actions Overseerr
@@ -432,7 +506,7 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
     elif decision == 'REJECTED':
         decline_overseerr_request(request_id)
     
-    # 🆕 Save to database avec title, username, media_type
+    # Save to database
     save_decision(request_id, decision, reason, confidence, rule_matched, 
                   enriched_data, title=title, username=username, media_type=media_type)
     
@@ -443,11 +517,9 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
         'confidence': confidence,
         'rule_matched': rule_matched,
         'title': title,
-        'username': username,      # 🆕
-        'media_type': media_type   # 🆕
+        'username': username,
+        'media_type': media_type
     }
-
-
 
 def save_for_review(request_id: int, enriched_data: dict, ai_result: dict, 
                     title: str, username: str, media_type: str):  # 🆕 params
