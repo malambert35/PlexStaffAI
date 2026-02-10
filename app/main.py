@@ -1588,10 +1588,20 @@ async def review_dashboard_html():
 async def get_pending_reviews():
     """Get pending review requests"""
     conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row  # 🆕 Pour accéder par nom de colonne
     cursor = conn.cursor()
     
     cursor.execute("""
-        SELECT request_id, request_data, ai_reason, ai_confidence, created_at
+        SELECT 
+            id,                -- 🆕 ID de la review (clé primaire)
+            request_id, 
+            title,             -- 🆕
+            username,          -- 🆕
+            media_type,        -- 🆕
+            request_data, 
+            ai_reason, 
+            ai_confidence, 
+            created_at
         FROM pending_reviews
         WHERE status = 'pending'
         ORDER BY created_at DESC
@@ -1603,103 +1613,250 @@ async def get_pending_reviews():
     
     reviews = []
     for row in rows:
+        # Parse request_data
+        try:
+            request_data = json.loads(row['request_data']) if row['request_data'] else {}
+        except:
+            request_data = {}
+        
         reviews.append({
-            'request_id': row[0],
-            'request_data': json.loads(row[1]),
-            'ai_reason': row[2],
-            'ai_confidence': row[3],
-            'created_at': row[4]
+            'id': row['id'],                                    # 🆕 ID pour approve/reject
+            'request_id': row['request_id'],
+            'title': row['title'] or 'Unknown',                # 🆕
+            'username': row['username'] or 'Unknown',          # 🆕
+            'media_type': row['media_type'] or 'unknown',      # 🆕
+            'request_data': request_data,
+            'ai_reason': row['ai_reason'],
+            'ai_confidence': row['ai_confidence'],
+            'created_at': row['created_at']
         })
     
     return JSONResponse(content={'reviews': reviews})
 
 
-@app.post("/staff/review/approve/{request_id}")
-async def approve_review(request_id: int, request: Request):
+@app.post("/staff/review/{review_id}/approve")  # 🆕 Changé le path
+async def approve_review(review_id: int, request: Request = None):
     """Staff approve a NEEDS_REVIEW request"""
-    body = await request.json() if request.headers.get('content-type') == 'application/json' else {}
-    staff_username = body.get('staff', 'admin')
-    
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT request_data, ai_decision FROM pending_reviews WHERE request_id = ?",
-        (request_id,)
-    )
-    row = cursor.fetchone()
-    
-    if not row:
-        raise HTTPException(404, "Review not found")
-    
-    request_data = json.loads(row[0])
-    ai_decision = row[1]
-    
-    moderator.record_human_decision(
-        request_id=request_id,
-        request_data=request_data,
-        ai_decision=ai_decision,
-        human_decision='APPROVED',
-        human_reason=body.get('reason', 'Staff approved'),
-        staff_username=staff_username
-    )
-    
-    approve_overseerr_request(request_id)
-    
-    cursor.execute(
-        "UPDATE pending_reviews SET status = 'approved' WHERE request_id = ?",
-        (request_id,)
-    )
-    conn.commit()
-    conn.close()
-    
-    save_decision(request_id, 'APPROVED', 'Staff approved', 1.0, 'human_review', request_data)
-    
-    return {'status': 'approved', 'request_id': request_id}
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        # 🆕 Utilise review_id (clé primaire) au lieu de request_id
+        cursor.execute("""
+            SELECT 
+                id, request_id, title, username, media_type, 
+                request_data, ai_decision
+            FROM pending_reviews 
+            WHERE id = ? AND status = 'pending'
+        """, (review_id,))
+        
+        row = cursor.fetchone()
+        
+        if not row:
+            conn.close()
+            return JSONResponse(
+                content={'success': False, 'error': 'Review not found or already processed'},
+                status_code=404
+            )
+        
+        request_id = row['request_id']
+        title = row['title'] or f"Request #{request_id}"
+        username = row['username'] or 'Unknown'
+        media_type = row['media_type'] or 'unknown'
+        
+        # Parse request_data
+        try:
+            request_data = json.loads(row['request_data']) if row['request_data'] else {}
+        except:
+            request_data = {}
+        
+        ai_decision = row['ai_decision']
+        
+        # 🆕 Record human feedback for ML
+        if moderator:
+            try:
+                moderator.record_human_decision(
+                    request_id=request_id,
+                    request_data=request_data,
+                    ai_decision=ai_decision,
+                    human_decision='APPROVED',
+                    human_reason='Staff approved',
+                    staff_username='admin'
+                )
+            except Exception as e:
+                print(f"⚠️  Failed to record ML feedback: {e}")
+        
+        # Approve in Overseerr
+        approve_result = approve_overseerr_request(request_id)
+        
+        if not approve_result:
+            conn.close()
+            return JSONResponse(
+                content={'success': False, 'error': 'Failed to approve in Overseerr'},
+                status_code=500
+            )
+        
+        # Update pending_reviews status
+        cursor.execute("""
+            UPDATE pending_reviews 
+            SET status = 'approved' 
+            WHERE id = ?
+        """, (review_id,))
+        
+        # 🆕 Save to decisions with title/username
+        cursor.execute("""
+            INSERT INTO decisions 
+            (request_id, title, username, media_type, decision, reason, 
+             confidence, rule_matched, request_data, timestamp)
+            VALUES (?, ?, ?, ?, 'APPROVED', 'Staff approved', 1.0, 
+                    'manual_staff', ?, ?)
+        """, (
+            request_id,
+            title,
+            username,
+            media_type,
+            json.dumps(request_data),
+            datetime.now().isoformat()
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        print(f"✅ Manual approval: {title} by {username}")
+        
+        return JSONResponse(content={
+            'success': True,
+            'message': f'Approved: {title}',
+            'request_id': request_id
+        })
+        
+    except Exception as e:
+        print(f"❌ Error approving review: {e}")
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(
+            content={'success': False, 'error': str(e)},
+            status_code=500
+        )
 
 
-@app.post("/staff/review/reject/{request_id}")
-async def reject_review(request_id: int, request: Request):
+@app.post("/staff/review/{review_id}/reject")  # 🆕 Changé le path
+async def reject_review(review_id: int, request: Request = None):
     """Staff reject a NEEDS_REVIEW request"""
-    body = await request.json()
-    staff_username = body.get('staff', 'admin')
-    reason = body.get('reason', 'Staff rejected')
-    
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    cursor.execute(
-        "SELECT request_data, ai_decision FROM pending_reviews WHERE request_id = ?",
-        (request_id,)
-    )
-    row = cursor.fetchone()
-    
-    if not row:
-        raise HTTPException(404, "Review not found")
-    
-    request_data = json.loads(row[0])
-    ai_decision = row[1]
-    
-    moderator.record_human_decision(
-        request_id=request_id,
-        request_data=request_data,
-        ai_decision=ai_decision,
-        human_decision='REJECTED',
-        human_reason=reason,
-        staff_username=staff_username
-    )
-    
-    decline_overseerr_request(request_id)
-    
-    cursor.execute(
-        "UPDATE pending_reviews SET status = 'rejected' WHERE request_id = ?",
-        (request_id,)
-    )
-    conn.commit()
-    conn.close()
-    
-    save_decision(request_id, 'REJECTED', reason, 1.0, 'human_review', request_data)
-    
-    return {'status': 'rejected', 'request_id': request_id}
-
+    try:
+        # Parse body (optionnel)
+        body = {}
+        if request:
+            try:
+                body = await request.json()
+            except:
+                pass
+        
+        reason = body.get('reason', 'Staff rejected')
+        
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cursor = conn.cursor()
+        
+        # 🆕 Utilise review_id (clé primaire)
+        cursor.execute("""
+            SELECT 
+                id, request_id, title, username, media_type,
+                request_data, ai_decision
+            FROM pending_reviews 
+            WHERE id = ? AND status = 'pending'
+        """, (review_id,))
+        
+        row = cursor.fetchone()
+        
+        if not row:
+            conn.close()
+            return JSONResponse(
+                content={'success': False, 'error': 'Review not found or already processed'},
+                status_code=404
+            )
+        
+        request_id = row['request_id']
+        title = row['title'] or f"Request #{request_id}"
+        username = row['username'] or 'Unknown'
+        media_type = row['media_type'] or 'unknown'
+        
+        # Parse request_data
+        try:
+            request_data = json.loads(row['request_data']) if row['request_data'] else {}
+        except:
+            request_data = {}
+        
+        ai_decision = row['ai_decision']
+        
+        # 🆕 Record human feedback for ML
+        if moderator:
+            try:
+                moderator.record_human_decision(
+                    request_id=request_id,
+                    request_data=request_data,
+                    ai_decision=ai_decision,
+                    human_decision='REJECTED',
+                    human_reason=reason,
+                    staff_username='admin'
+                )
+            except Exception as e:
+                print(f"⚠️  Failed to record ML feedback: {e}")
+        
+        # Decline in Overseerr
+        decline_result = decline_overseerr_request(request_id)
+        
+        if not decline_result:
+            conn.close()
+            return JSONResponse(
+                content={'success': False, 'error': 'Failed to decline in Overseerr'},
+                status_code=500
+            )
+        
+        # Update pending_reviews status
+        cursor.execute("""
+            UPDATE pending_reviews 
+            SET status = 'rejected' 
+            WHERE id = ?
+        """, (review_id,))
+        
+        # 🆕 Save to decisions with title/username
+        cursor.execute("""
+            INSERT INTO decisions 
+            (request_id, title, username, media_type, decision, reason, 
+             confidence, rule_matched, request_data, timestamp)
+            VALUES (?, ?, ?, ?, 'REJECTED', ?, 1.0, 
+                    'manual_staff', ?, ?)
+        """, (
+            request_id,
+            title,
+            username,
+            media_type,
+            reason,
+            json.dumps(request_data),
+            datetime.now().isoformat()
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        print(f"❌ Manual rejection: {title} by {username}")
+        
+        return JSONResponse(content={
+            'success': True,
+            'message': f'Rejected: {title}',
+            'request_id': request_id
+        })
+        
+    except Exception as e:
+        print(f"❌ Error rejecting review: {e}")
+        import traceback
+        traceback.print_exc()
+        return JSONResponse(
+            content={'success': False, 'error': str(e)},
+            status_code=500
+        )
 
 @app.get("/staff/pending-count")
 async def pending_count():
