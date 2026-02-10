@@ -277,6 +277,14 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
     media_type = media.get('mediaType', 'unknown')
     tmdb_id = media.get('tmdbId')
     
+    # 🆕 EXTRAIRE USERNAME DÈS LE DÉBUT
+    requested_by_obj = request_data.get('requestedBy', {})
+    username = requested_by_obj.get('displayName') or \
+               requested_by_obj.get('username') or \
+               requested_by_obj.get('email') or \
+               'Unknown User'
+    user_id = str(requested_by_obj.get('id', 'unknown'))
+    
     # ENRICHISSEMENT TMDB si données manquantes
     tmdb_enriched = {}
     needs_enrichment = (
@@ -293,8 +301,9 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
     # Extraction avec fallback TMDB
     title = get_title_from_media(media, tmdb_enriched)
     year = tmdb_enriched.get('year') or (media.get('releaseDate', '')[:4] if media.get('releaseDate') else '')
-    requested_by = request_data.get('requestedBy', {}).get('displayName', 'unknown')
-    user_id = str(request_data.get('requestedBy', {}).get('id', 'unknown'))
+    
+    # 🆕 CHANGÉ: utilise la variable username définie plus haut
+    requested_by = username
     
     # EXTRACTION ROBUSTE DES COUNTS
     seasons = tmdb_enriched.get('seasons') or media.get('seasons', [])
@@ -324,7 +333,7 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
     print(f"📊 TMDB ID: {tmdb_id}")
     print(f"📺 Type: {media_type}")
     print(f"📅 Year: {year}")
-    print(f"👤 User: {requested_by} (ID: {user_id})")
+    print(f"👤 User: {requested_by} (ID: {user_id}")
     if tmdb_enriched:
         print(f"🌐 Data source: TMDB API enrichment ✅")
     else:
@@ -399,18 +408,22 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
     
     # GESTION NEEDS_REVIEW
     if decision == 'NEEDS_REVIEW':
+        # 🆕 PASSER title, username, media_type
         save_for_review(request_id, enriched_data, {
             'decision': decision,
             'reason': reason,
             'confidence': confidence,
             'rule_matched': rule_matched
-        })
+        }, title=title, username=username, media_type=media_type)  # 🆕
+        
         return {
             'decision': 'NEEDS_REVIEW',
             'reason': reason,
             'confidence': confidence,
             'action': 'pending_staff_review',
-            'title': title
+            'title': title,
+            'username': username,      # 🆕
+            'media_type': media_type   # 🆕
         }
     
     # Actions Overseerr
@@ -419,8 +432,9 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
     elif decision == 'REJECTED':
         decline_overseerr_request(request_id)
     
-    # Save to database
-    save_decision(request_id, decision, reason, confidence, rule_matched, enriched_data)
+    # 🆕 Save to database avec title, username, media_type
+    save_decision(request_id, decision, reason, confidence, rule_matched, 
+                  enriched_data, title=title, username=username, media_type=media_type)
     
     return {
         'request_id': request_id,
@@ -428,43 +442,74 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
         'reason': reason,
         'confidence': confidence,
         'rule_matched': rule_matched,
-        'title': title
+        'title': title,
+        'username': username,      # 🆕
+        'media_type': media_type   # 🆕
     }
 
 
-def save_for_review(request_id: int, request_data: dict, decision_result: dict):
-    """Save request for staff review"""
+
+def save_for_review(request_id: int, enriched_data: dict, ai_result: dict, 
+                    title: str, username: str, media_type: str):  # 🆕 params
+    """Sauvegarde une requête pour révision manuelle"""
+    
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
     cursor.execute("""
         INSERT OR REPLACE INTO pending_reviews 
-        (request_id, request_data, ai_decision, ai_reason, ai_confidence)
-        VALUES (?, ?, ?, ?, ?)
+        (request_id, title, username, media_type, request_data, 
+         ai_decision, ai_reason, ai_confidence, status, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
     """, (
         request_id,
-        json.dumps(request_data),
-        decision_result['decision'],
-        decision_result['reason'],
-        decision_result.get('confidence', 0.5)
+        title,                              # 🆕
+        username,                           # 🆕
+        media_type,                         # 🆕
+        json.dumps(enriched_data),
+        ai_result.get('decision'),
+        ai_result.get('reason'),
+        ai_result.get('confidence'),
+        datetime.now().isoformat()
     ))
     
     conn.commit()
     conn.close()
+    
+    print(f"💾 Saved to pending_reviews: {title} by {username}")
+
 
 
 def save_decision(request_id: int, decision: str, reason: str, 
-                 confidence: float, rule_matched: str, request_data: dict = None):
-    """Save decision to database with full metadata"""
+                  confidence: float, rule_matched: str, enriched_data: dict,
+                  title: str, username: str, media_type: str):  # 🆕 params
+    """Sauvegarde la décision dans l'historique"""
+    
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    
     cursor.execute("""
         INSERT INTO decisions 
-        (request_id, decision, reason, confidence, rule_matched, request_data)
-        VALUES (?, ?, ?, ?, ?, ?)
-    """, (request_id, decision, reason, confidence, rule_matched, json.dumps(request_data)))
+        (request_id, title, username, media_type, decision, reason, 
+         confidence, rule_matched, request_data, timestamp)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (
+        request_id,
+        title,                              # 🆕
+        username,                           # 🆕
+        media_type,                         # 🆕
+        decision,
+        reason,
+        confidence,
+        rule_matched,
+        json.dumps(enriched_data),
+        datetime.now().isoformat()
+    ))
+    
     conn.commit()
     conn.close()
+    
+    print(f"💾 Saved to decisions: {title} by {username} → {decision}")
 
 
 def auto_moderate_pending():
