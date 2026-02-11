@@ -713,24 +713,39 @@ def save_decision(request_id: int, decision: str, reason: str,
 
 
 def auto_moderate_pending():
-    """Fonction appelée automatiquement par le scheduler"""
+    """Fonction appelée automatiquement par le scheduler (avec déduplication)"""
     try:
         print(f"\n⏰ {'='*60}")
         print(f"⏰ AUTO-SCAN TRIGGERED at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"⏰ {'='*60}\n")
         
+        # Récupérer les requêtes pending d'Overseerr
         requests = get_overseerr_requests()
         
         if not requests:
             print("✅ No pending requests found")
             return
         
-        print(f"📊 Found {len(requests)} pending request(s)")
+        print(f"📊 Found {len(requests)} pending request(s) in Overseerr")
+        
+        # 🆕 Charger les IDs déjà traités depuis la DB
+        already_processed = get_processed_request_ids()
+        print(f"📋 Already processed: {len(already_processed)} request(s)")
         
         results = []
+        skipped = 0
+        
         for req in requests:
-            print(f"\n🎬 Processing request #{req['id']}...")
-            result = moderate_request(req['id'], req)
+            request_id = req.get('id')
+            
+            # 🆕 Skip si déjà traité
+            if request_id in already_processed:
+                skipped += 1
+                print(f"⏭️  Skipping request #{request_id} (already processed)")
+                continue
+            
+            print(f"\n🎬 Processing request #{request_id}...")
+            result = moderate_request(request_id, req)
             results.append(result)
         
         approved = sum(1 for r in results if r.get('decision') == 'APPROVED')
@@ -741,10 +756,131 @@ def auto_moderate_pending():
         print(f"   ✅ Approved: {approved}")
         print(f"   ❌ Rejected: {rejected}")
         print(f"   🧑‍⚖️ Needs Review: {needs_review}")
+        print(f"   ⏭️  Skipped (already processed): {skipped}")
         print(f"⏰ {'='*60}\n")
         
     except Exception as e:
         print(f"❌ Auto-scan error: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+def get_processed_request_ids() -> set:
+    """
+    Récupère les IDs de requêtes déjà traitées depuis la DB
+    
+    Returns:
+        Set d'IDs de requêtes (pour lookup O(1) rapide)
+    """
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # Récupérer tous les request_id déjà dans decisions
+        cursor.execute("SELECT DISTINCT request_id FROM decisions")
+        
+        processed_ids = {row[0] for row in cursor.fetchall()}
+        
+        conn.close()
+        
+        return processed_ids
+        
+    except Exception as e:
+        print(f"⚠️  Error loading processed IDs: {e}")
+        return set()
+
+def save_decision(request_id: int, decision: str, reason: str, confidence: float, 
+                  rule_matched: str, request_data: dict, title: str = None, 
+                  username: str = None, media_type: str = None):
+    """Save moderation decision to database (avec protection anti-doublon)"""
+    
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # 🆕 Vérifier si déjà traité récemment (dernières 5 minutes)
+    cursor.execute("""
+        SELECT id, decision, timestamp 
+        FROM decisions 
+        WHERE request_id = ? 
+        ORDER BY timestamp DESC 
+        LIMIT 1
+    """, (request_id,))
+    
+    existing = cursor.fetchone()
+    
+    if existing:
+        existing_decision = existing[1]
+        existing_timestamp = existing[2]
+        
+        try:
+            # Parse timestamp (ISO format ou datetime string)
+            if 'T' in existing_timestamp:
+                existing_time = datetime.fromisoformat(existing_timestamp.replace('Z', '+00:00'))
+            else:
+                existing_time = datetime.strptime(existing_timestamp, '%Y-%m-%d %H:%M:%S')
+            
+            time_diff = datetime.now() - existing_time.replace(tzinfo=None)
+            
+            # Si même décision dans les 5 dernières minutes → skip
+            if time_diff.total_seconds() < 300:  # 5 minutes
+                print(f"⏭️  Duplicate detected: Request #{request_id} already saved {int(time_diff.total_seconds())}s ago")
+                conn.close()
+                return
+                
+        except Exception as e:
+            print(f"⚠️  Timestamp parse error: {e}")
+    
+    # Extraire title, username si pas fournis
+    if not title or not username or not media_type:
+        try:
+            media = request_data.get('media', {})
+            if not title:
+                title = media.get('title') or media.get('name') or f"Request #{request_id}"
+            if not username:
+                requested_by = request_data.get('requestedBy', {})
+                username = requested_by.get('displayName') or \
+                          requested_by.get('username') or \
+                          requested_by.get('email') or \
+                          'Unknown'
+            if not media_type:
+                media_type = media.get('mediaType', 'unknown')
+        except Exception as e:
+            print(f"⚠️  Error extracting metadata: {e}")
+    
+    # Fallbacks
+    title = title or f"Request #{request_id}"
+    username = username or "Unknown"
+    media_type = media_type or "unknown"
+    
+    # Save to database
+    try:
+        cursor.execute("""
+            INSERT INTO decisions 
+            (request_id, title, username, media_type, decision, reason, 
+             confidence, rule_matched, request_data, timestamp)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (
+            request_id,
+            title,
+            username,
+            media_type,
+            decision,
+            reason,
+            confidence,
+            rule_matched,
+            json.dumps(request_data),
+            datetime.now().isoformat()
+        ))
+        
+        conn.commit()
+        print(f"💾 Saved to decisions: {title} by {username} → {decision}")
+        
+    except sqlite3.IntegrityError as e:
+        print(f"⚠️  Database constraint error (possible duplicate): {e}")
+    except Exception as e:
+        print(f"❌ Error saving decision: {e}")
+    finally:
+        conn.close()
 
 
 @app.get("/staff/moderate")
