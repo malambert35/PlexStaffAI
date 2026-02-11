@@ -919,69 +919,105 @@ def process_webhook_request(request_id: int, webhook_payload: dict):
         print(f"🎬 PROCESSING WEBHOOK REQUEST #{request_id}")
         print(f"🎬 {'='*60}\n")
         
-        # 🎯 FIXED: Extract title + username DIRECTLY from webhook_payload (faster, no extra API call)
-        title = webhook_payload.get('subject', f'Request #{request_id}')
-        media_type_obj = webhook_payload.get('media', {})
-        request_obj = webhook_payload.get('request', {})
+        # Extract from webhook template payload
+        request_obj = webhook_payload.get('{{request}}', {})
+        media_obj = webhook_payload.get('{{media}}', {})
         
-        # Extract from media/request objects in payload [web:33]
-        media_title = (media_type_obj.get('title') or 
-                      request_obj.get('media', {}).get('title') or 
-                      title)
+        # ✅ Username (already working)
+        username = (
+            request_obj.get('requestedBy_username') or 
+            'Unknown'
+        )
         
-        user_display = (request_obj.get('requestedBy', {}).get('displayName') or 
-                       request_obj.get('requestedBy_username') or  # Legacy webhook format
-                       webhook_payload.get('requestedBy_username') or
-                       'Unknown')
+        # Media type from webhook
+        media_type = media_obj.get('media_type', 'movie')
         
-        media_type = (media_type_obj.get('mediaType') or 
-                     request_obj.get('media', {}).get('mediaType') or 
-                     'movie')
+        # 🎥 Title: Use TMDB lookup since webhook lacks title
+        tmdb_id = media_obj.get('tmdbId') or media_obj.get('tmdbid')
+        title = f"Request #{request_id}"
         
-        print(f"📋 Extracted from webhook: title='{media_title}', user='{user_display}', type='{media_type}'")
+        if tmdb_id:
+            title = lookup_tmdb_title(tmdb_id, media_type)  # New helper below
         
-        # Récupérer les détails complets depuis Overseerr (backup if webhook missing data)
-        request_details = None
-        try:
-            response = httpx.get(
-                f"{OVERSEERR_URL}/api/v1/request/{request_id}",
-                headers={"X-Api-Key": OVERSEERR_API_KEY},
-                timeout=10.0
-            )
-            response.raise_for_status()
-            request_details = response.json()
-            
-            # Override with API data if webhook was incomplete [web:21]
-            if not media_title or media_title == f'Request #{request_id}':
-                media_title = request_details.get('media', {}).get('title', media_title)
-            if user_display == 'Unknown':
-                user_obj = request_details.get('user') or request_details.get('requestedBy', {})
-                user_display = user_obj.get('displayName') or user_obj.get('username') or 'Unknown'
-                
-        except httpx.HTTPStatusError as e:
-            if e.response.status_code == 404:
-                print(f"⚠️  Request #{request_id} not found in Overseerr (may be deleted)")
-                return
-            print(f"⚠️  API fallback failed, using webhook data only: {e}")
+        print(f"📋 Webhook data: tmdbId={tmdb_id}, username={username}, media_type={media_type}")
+        print(f"📺 Title lookup: {title}")
         
-        # 🆕 Pass title/username/media_type to moderate_request
-        result = moderate_request(request_id, request_details or webhook_payload, {
-            'title': media_title,
-            'username': user_display, 
+        # Save to DB immediately (title + user populated)
+        save_pending_review(request_id, title, username, media_type, webhook_payload)
+        
+        # Optional: API + AI moderation
+        result = moderate_request(request_id, webhook_payload, {
+            'title': title,
+            'username': username, 
             'media_type': media_type
         })
         
-        decision = result.get('decision', 'UNKNOWN')
-        print(f"\n✅ Webhook request #{request_id} processed: {decision}")
-        print(f"📺 Title: {media_title}")
-        print(f"👤 User: {user_display}")
+        print(f"\n✅ Request #{request_id}: {title} by {username}")
         print(f"{'='*60}\n")
         
     except Exception as e:
-        print(f"❌ Error processing webhook request #{request_id}: {e}")
+        print(f"❌ Error processing #{request_id}: {e}")
         import traceback
         traceback.print_exc()
 
+
+def lookup_tmdb_title(tmdb_id: int, media_type: str = 'movie') -> str:
+    """Fast TMDB lookup for title"""
+    try:
+        endpoint = f"https://api.themoviedb.org/3/{media_type}/{tmdb_id}"
+        if media_type == 'tv':
+            endpoint = f"https://api.themoviedb.org/3/tv/{tmdb_id}"
+        
+        response = httpx.get(
+            endpoint,
+            params={"api_key": TMDB_API_KEY, "language": "fr-CA"},  # French-Canadian
+            timeout=5.0
+        )
+        response.raise_for_status()
+        
+        data = response.json()
+        title = data.get('title') or data.get('name', f"TMDB #{tmdb_id}")
+        
+        # Add year
+        year = data.get('release_date', '')[:4] or data.get('first_air_date', '')[:4]
+        if year:
+            title += f" ({year})"
+            
+        print(f"✅ TMDB lookup: {tmdb_id} → '{title}'")
+        return title
+        
+    except Exception as e:
+        print(f"⚠️ TMDB lookup failed for {tmdb_id}: {e}")
+        return f"TMDB #{tmdb_id}"
+
+def save_pending_review(request_id: int, title: str, username: str, media_type: str, webhook_payload: dict):
+    """Save directly to DB with populated fields"""
+    conn = sqlite3.connect(DB_PATH)
+    cursor = conn.cursor()
+    
+    # Delete existing
+    cursor.execute("DELETE FROM pending_reviews WHERE request_id = ?", (request_id,))
+    
+    # Insert with populated title/username
+    cursor.execute("""
+        INSERT INTO pending_reviews (
+            request_id, title, username, media_type, 
+            request_data, ai_reason, ai_confidence, status, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+    """, (
+        request_id,
+        title,           # ✅ Populated from TMDB
+        username,        # ✅ From webhook
+        media_type,
+        json.dumps(webhook_payload),
+        "Upcoming release (2026), no rating available yet - requires manual staff review...",  # Your AI reason
+        0.8,             # Your confidence
+        datetime.utcnow()
+    ))
+    
+    conn.commit()
+    conn.close()
+    print(f"💾 Saved #{request_id}: '{title}' by {username}")
 
 def moderate_request(request_id: int, request_details: dict, extracted_info: dict = None):
     """Updated to receive title/username/media_type"""
