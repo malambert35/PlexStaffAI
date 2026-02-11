@@ -1,25 +1,16 @@
-version: '3.8'
 services:
   plexstaffai:
     build: .
     container_name: plexstaffai
-    environment:
-      - SCAN_INTERVAL_MINUTES=1 
-      - OPENAI_API_KEY=${OPENAI_API_KEY}
-      - OVERSEERR_API_URL=${OVERSEERR_API_URL}
-      - OVERSEERR_API_KEY=${OVERSEERR_API_KEY}
-      - PLEX_URL=${PLEX_URL}
-      - PLEX_TOKEN=${PLEX_TOKEN}
-      - TZ=America/Montreal
-      - PORT=5056
-    volumes:
-      - /mnt/user/appdata/plexstaffai:/config
-      - /mnt/user/appdata/plexstaffai/logs:/logs
     ports:
-      - 5056:5056
+      - "5056:5056"
+    env_file: .env
+    volumes:
+      - ./data:/app/data
     restart: unless-stopped
     networks:
-      - proxarr
+      - media  # Your Overseerr/Plex network
+
 networks:
-  proxarr:
+  media:
     external: true
