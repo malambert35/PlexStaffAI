@@ -23,7 +23,7 @@ class RulesValidator:
         "Familial": "Family",
         "Famille": "Family",
         "Guerre": "War",
-        "Histoire': 'History",
+        "Histoire": "History",
         "Western": "Western",
         "Aventure": "Adventure",
         "Historique": "History",
