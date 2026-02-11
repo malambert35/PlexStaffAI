@@ -7,9 +7,6 @@ from datetime import datetime, timedelta
 import sqlite3
 from pathlib import Path
 import json
-from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.interval import IntervalTrigger
-import atexit
 
 # ===== CONFIGURATION GLOBALE (EN PREMIER) =====
 # 🆕 Définir TOUTES les variables AVANT les imports de modules
@@ -18,7 +15,7 @@ OPENAI_ENABLED = os.getenv("OPENAI_ENABLED", "true").lower() == "true"
 OVERSEERR_URL = os.getenv("OVERSEERR_API_URL", "http://overseerr:5055")  # 🆕 Renommé pour cohérence
 OVERSEERR_API_KEY = os.getenv("OVERSEERR_API_KEY", "")
 TMDB_API_KEY = os.getenv("TMDB_API_KEY", "")
-SCAN_INTERVAL_MINUTES = int(os.getenv("SCAN_INTERVAL_MINUTES", "1"))
+WEBHOOK_SECRET = os.getenv("WEBHOOK_SECRET", "")  # 🆕 Optionnel pour sécuriser le webhook
 DB_PATH = "/config/moderation.db"
 
 # Validation des variables requises
@@ -37,7 +34,8 @@ print(f"🎬 TMDB API Key: {'SET ✅' if TMDB_API_KEY else 'NOT SET ⚠️'}")
 print(f"🤖 OpenAI Enabled: {'YES ✅' if OPENAI_ENABLED and OPENAI_API_KEY else 'NO (Rules-Only Mode)'}")
 if OPENAI_ENABLED and OPENAI_API_KEY:
     print(f"🔑 OpenAI API Key: ***{OPENAI_API_KEY[-4:]}")
-print(f"⏰ Auto-Scan Interval: {SCAN_INTERVAL_MINUTES} minute(s)")
+print(f"🔔 Webhook Mode: ENABLED (Instant moderation ⚡)")
+print(f"🔒 Webhook Secret: {'SET ✅' if WEBHOOK_SECRET else 'NOT SET (public)'}")
 print(f"💾 Database Path: {DB_PATH}")
 print(f"{'='*60}\n")
 
@@ -75,12 +73,6 @@ if OPENAI_ENABLED and OPENAI_API_KEY:
         openai_moderator = None
 else:
     print("ℹ️  OpenAI moderation disabled (Rules-Only mode)")
-
-# ===== SCHEDULER SETUP =====
-scheduler = BackgroundScheduler()
-
-# Shutdown scheduler on app exit
-atexit.register(lambda: scheduler.shutdown())
 
 print("✅ PlexStaffAI initialization complete\n")
 
@@ -712,59 +704,6 @@ def save_decision(request_id: int, decision: str, reason: str,
     print(f"💾 Saved to decisions: {title} by {username} → {decision}")
 
 
-def auto_moderate_pending():
-    """Fonction appelée automatiquement par le scheduler (avec déduplication)"""
-    try:
-        print(f"\n⏰ {'='*60}")
-        print(f"⏰ AUTO-SCAN TRIGGERED at {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
-        print(f"⏰ {'='*60}\n")
-        
-        # Récupérer les requêtes pending d'Overseerr
-        requests = get_overseerr_requests()
-        
-        if not requests:
-            print("✅ No pending requests found")
-            return
-        
-        print(f"📊 Found {len(requests)} pending request(s) in Overseerr")
-        
-        # 🆕 Charger les IDs déjà traités depuis la DB
-        already_processed = get_processed_request_ids()
-        print(f"📋 Already processed: {len(already_processed)} request(s)")
-        
-        results = []
-        skipped = 0
-        
-        for req in requests:
-            request_id = req.get('id')
-            
-            # 🆕 Skip si déjà traité
-            if request_id in already_processed:
-                skipped += 1
-                print(f"⏭️  Skipping request #{request_id} (already processed)")
-                continue
-            
-            print(f"\n🎬 Processing request #{request_id}...")
-            result = moderate_request(request_id, req)
-            results.append(result)
-        
-        approved = sum(1 for r in results if r.get('decision') == 'APPROVED')
-        rejected = sum(1 for r in results if r.get('decision') == 'REJECTED')
-        needs_review = sum(1 for r in results if r.get('decision') == 'NEEDS_REVIEW')
-        
-        print(f"\n⏰ AUTO-SCAN COMPLETE:")
-        print(f"   ✅ Approved: {approved}")
-        print(f"   ❌ Rejected: {rejected}")
-        print(f"   🧑‍⚖️ Needs Review: {needs_review}")
-        print(f"   ⏭️  Skipped (already processed): {skipped}")
-        print(f"⏰ {'='*60}\n")
-        
-    except Exception as e:
-        print(f"❌ Auto-scan error: {e}")
-        import traceback
-        traceback.print_exc()
-
-
 def get_processed_request_ids() -> set:
     """
     Récupère les IDs de requêtes déjà traitées depuis la DB
@@ -882,6 +821,158 @@ def save_decision(request_id: int, decision: str, reason: str, confidence: float
     finally:
         conn.close()
 
+# ===== WEBHOOK ENDPOINT =====
+@app.post("/webhook/overseerr")
+async def overseerr_webhook(request: Request, background_tasks: BackgroundTasks):
+    """
+    Receive webhook from Overseerr for instant moderation
+    
+    Overseerr Configuration:
+    - URL: http://plexstaffai:5056/webhook/overseerr
+    - Authorization: Bearer YOUR_WEBHOOK_SECRET (optional)
+    - Events: Media Requested, Media Pending
+    """
+    try:
+        # 🔒 Vérifier le token si configuré
+        if WEBHOOK_SECRET:
+            auth_header = request.headers.get("Authorization", "")
+            expected = f"Bearer {WEBHOOK_SECRET}"
+            if auth_header != expected:
+                print(f"⚠️  Webhook unauthorized: {auth_header[:20]}...")
+                raise HTTPException(status_code=401, detail="Unauthorized")
+        
+        payload = await request.json()
+        
+        notification_type = payload.get('notification_type', 'unknown')
+        event = payload.get('event', 'unknown')
+        subject = payload.get('subject', 'Unknown')
+        
+        print(f"\n🔔 {'='*60}")
+        print(f"🔔 WEBHOOK RECEIVED from Overseerr")
+        print(f"🔔 Type: {notification_type}")
+        print(f"🔔 Event: {event}")
+        print(f"🔔 Subject: {subject}")
+        print(f"🔔 {'='*60}\n")
+        
+        # Extraire request_id
+        request_id = None
+        request_data = payload.get('request', {})
+        
+        if request_data:
+            request_id = request_data.get('request_id') or request_data.get('id')
+        
+        if not request_id:
+            media_data = payload.get('media', {})
+            request_id = media_data.get('request_id')
+        
+        if not request_id:
+            print("⚠️  No request_id found in webhook payload")
+            print(f"📦 Full payload: {json.dumps(payload, indent=2)}")
+            return {"status": "ignored", "reason": "no request_id"}
+        
+        # Vérifier si déjà traité
+        already_processed = get_processed_request_ids()
+        
+        if request_id in already_processed:
+            print(f"⏭️  Request #{request_id} already processed, skipping")
+            return {
+                "status": "skipped", 
+                "request_id": request_id,
+                "reason": "already_processed"
+            }
+        
+        # 🚀 Trigger modération en arrière-plan (non-bloquant)
+        background_tasks.add_task(process_webhook_request, request_id, payload)
+        
+        return {
+            "status": "accepted",
+            "request_id": request_id,
+            "message": "Moderation triggered ⚡"
+        }
+        
+    except HTTPException:
+        raise
+    except json.JSONDecodeError as e:
+        print(f"❌ Webhook JSON parse error: {e}")
+        raise HTTPException(status_code=400, detail="Invalid JSON")
+    except Exception as e:
+        print(f"❌ Webhook error: {e}")
+        import traceback
+        traceback.print_exc()
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+def process_webhook_request(request_id: int, webhook_payload: dict):
+    """Process a single request from webhook (background task)"""
+    try:
+        print(f"\n🎬 {'='*60}")
+        print(f"🎬 PROCESSING WEBHOOK REQUEST #{request_id}")
+        print(f"🎬 {'='*60}\n")
+        
+        # Récupérer les détails complets depuis Overseerr
+        try:
+            response = httpx.get(
+                f"{OVERSEERR_URL}/api/v1/request/{request_id}",
+                headers={"X-Api-Key": OVERSEERR_API_KEY},
+                timeout=10.0
+            )
+            response.raise_for_status()
+            request_details = response.json()
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 404:
+                print(f"⚠️  Request #{request_id} not found in Overseerr (may be deleted)")
+                return
+            raise
+        
+        # Modérer
+        result = moderate_request(request_id, request_details)
+        
+        decision = result.get('decision', 'UNKNOWN')
+        print(f"\n✅ Webhook request #{request_id} processed: {decision}")
+        print(f"{'='*60}\n")
+        
+    except Exception as e:
+        print(f"❌ Error processing webhook request #{request_id}: {e}")
+        import traceback
+        traceback.print_exc()
+
+
+# ===== MANUAL TRIGGER ENDPOINT (pour tests) =====
+@app.post("/admin/moderate-now")
+async def manual_moderate_now(background_tasks: BackgroundTasks):
+    """Manually trigger moderation for all pending requests"""
+    try:
+        requests = get_overseerr_requests()
+        
+        if not requests:
+            return {
+                "status": "success",
+                "message": "No pending requests found",
+                "processed": 0
+            }
+        
+        already_processed = get_processed_request_ids()
+        
+        pending_count = 0
+        for req in requests:
+            request_id = req.get('id')
+            if request_id not in already_processed:
+                background_tasks.add_task(process_webhook_request, request_id, req)
+                pending_count += 1
+        
+        return {
+            "status": "success",
+            "message": f"Processing {pending_count} pending request(s)",
+            "total_found": len(requests),
+            "already_processed": len(requests) - pending_count
+        }
+        
+    except Exception as e:
+        print(f"❌ Manual moderate error: {e}")
+        return {
+            "status": "error",
+            "message": str(e)
+        }
 
 @app.get("/staff/moderate")
 @app.post("/staff/moderate")
@@ -1004,7 +1095,6 @@ async def moderate_html():
             <div class="text-6xl mb-4">✨</div>
             <div class="text-2xl font-bold mb-2">Aucune requête en attente</div>
             <div class="text-lg">Tous les contenus ont été modérés !</div>
-            <div class="text-sm text-gray-600 mt-2">Le système scan automatiquement toutes les ''' + str(SCAN_INTERVAL_MINUTES) + ''' minute(s)</div>
         </div>
 '''
         
@@ -1027,10 +1117,6 @@ async def moderate_html():
            class="bg-purple-600 hover:bg-purple-700 px-8 py-3 rounded-xl font-bold text-lg transition shadow-lg inline-block">
             📜 Historique
         </a>
-    </div>
-    
-    <div class="text-center text-gray-500 text-sm mt-4">
-        ⏱️ Modération terminée • Prochain auto-scan dans {SCAN_INTERVAL_MINUTES} min
     </div>
 </div>
 '''
@@ -1083,7 +1169,6 @@ async def stats():
         "needs_review": stats.get('NEEDS_REVIEW', 0),
         "approval_rate": round(approved / total * 100, 1) if total > 0 else 0,
         "last_24h": last_24h,
-        "scan_interval": SCAN_INTERVAL_MINUTES,
         "openai_enabled": openai_moderator is not None  # 🆕 Statut OpenAI
     }
 
@@ -2487,22 +2572,17 @@ async def openai_stats_html():
     """
     return HTMLResponse(content=html_content)
 
-# ✨ CONFIGURE SCHEDULER ON STARTUP
 @app.on_event("startup")
 async def startup_event():
-    """Start scheduler on app startup"""
-    scheduler.add_job(
-        func=auto_moderate_pending,
-        trigger=IntervalTrigger(minutes=SCAN_INTERVAL_MINUTES),
-        id='auto_moderate_job',
-        name='Auto-moderate pending requests',
-        replace_existing=True
-    )
+    """Initialize app on startup"""
+    init_db()
+    cleanup_stale_reviews()
+    
     print(f"\n🚀 {'='*60}")
-    print(f"🚀 PLEXSTAFFAI v1.6.0 STARTED")
-    print(f"🚀 Auto-Scan: Every {SCAN_INTERVAL_MINUTES} minute(s)")
-    print(f"🚀 OpenAI: {'✅ Configured' if OPENAI_API_KEY else '❌ Not configured'}")
-    print(f"🚀 TMDB: {'✅ Configured' if TMDB_API_KEY else '⚠️  Optional - not configured'}")
+    print(f"🚀 PLEXSTAFFAI v1.7.0 STARTED")
+    print(f"🚀 Mode: WEBHOOK (Instant moderation ⚡)")
+    print(f"🚀 OpenAI: {'✅ Configured' if openai_moderator else '❌ Disabled'}")
+    print(f"🚀 TMDB: {'✅ Configured' if TMDB_API_KEY else '❌ Not set'}")
     print(f"🚀 {'='*60}\n")
 
 
