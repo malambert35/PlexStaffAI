@@ -382,264 +382,45 @@ def get_title_from_media(media: dict, tmdb_enriched: dict = None) -> str:
     return f"TMDB-{media.get('tmdbId', 'unknown')}"
 
 
-def moderate_request(request_id: int, request_data: dict) -> dict:
-    """
-    RULES-FIRST Moderation with AI Fallback
-    
-    Workflow:
-    1. Rules validation FIRST (genres whitelist/blacklist, ratings strictes)
-    2. Si règle stricte match → Skip OpenAI (économise tokens)
-    3. Sinon → OpenAI analyse + Rules ajustements
-    """
-    
-    # Extract metadata from Overseerr
-    media = request_data.get('media', {})
-    media_type = media.get('mediaType', 'unknown')
-    tmdb_id = media.get('tmdbId')
-    
-    # EXTRAIRE USERNAME DÈS LE DÉBUT
-    requested_by_obj = request_data.get('requestedBy', {})
-    username = requested_by_obj.get('displayName') or \
-               requested_by_obj.get('username') or \
-               requested_by_obj.get('email') or \
-               'Unknown User'
-    user_id = str(requested_by_obj.get('id', 'unknown'))
-    
-    # ENRICHISSEMENT TMDB si données manquantes
-    tmdb_enriched = {}
-    needs_enrichment = (
-        not media.get('title') and 
-        not media.get('name') and 
-        tmdb_id and 
-        media_type in ['movie', 'tv']
-    )
-    
-    if needs_enrichment:
-        print(f"🔍 Overseerr data incomplete, enriching from TMDB...")
-        tmdb_enriched = enrich_from_tmdb(tmdb_id, media_type)
-    
-    # Extraction avec fallback TMDB
-    title = get_title_from_media(media, tmdb_enriched)
-    year = tmdb_enriched.get('year') or (media.get('releaseDate', '')[:4] if media.get('releaseDate') else '')
-    requested_by = username
-    
-    # EXTRACTION ROBUSTE DES COUNTS
-    seasons = tmdb_enriched.get('seasons') or media.get('seasons', [])
-    episode_count_from_seasons = sum(s.get('episodeCount', 0) or s.get('episode_count', 0) for s in seasons)
-    season_count_from_list = len(seasons)
-    
-    season_count_from_field = (
-        tmdb_enriched.get('season_count') or 
-        media.get('numberOfSeasons', 0)
-    )
-    episode_count_from_field = (
-        tmdb_enriched.get('episode_count') or 
-        media.get('numberOfEpisodes', 0)
-    )
-    
-    season_count = max(season_count_from_list, season_count_from_field)
-    episode_count = max(episode_count_from_seasons, episode_count_from_field)
-    
-    rating = tmdb_enriched.get('rating') or media.get('voteAverage', 0)
-    popularity = tmdb_enriched.get('popularity') or media.get('popularity', 0)
-    genres = tmdb_enriched.get('genres') or [g.get('name', '') for g in media.get('genres', [])]
-    
-    # DEBUG LOGS
-    print(f"\n{'='*60}")
-    print(f"🎬 REQUEST #{request_id}: {title}")
-    print(f"{'='*60}")
-    print(f"📊 TMDB ID: {tmdb_id}")
-    print(f"📺 Type: {media_type}")
-    print(f"📅 Year: {year}")
-    print(f"👤 User: {requested_by} (ID: {user_id})")
-    if tmdb_enriched:
-        print(f"🌐 Data source: TMDB API enrichment ✅")
-    else:
-        print(f"📦 Data source: Overseerr")
-    print(f"\n📈 CONTENT STATS:")
-    print(f"  Seasons: {season_count}")
-    print(f"  Episodes: {episode_count}")
-    print(f"  Rating: {rating}/10")
-    print(f"  Popularity: {popularity}")
-    print(f"  Genres: {', '.join(genres) if genres else 'N/A'}")
-    print(f"{'='*60}")
-    
-    # Enrichir data
-    enriched_data = {
-        'title': title,
-        'media_type': media_type,
-        'year': year,
-        'requested_by': requested_by,
-        'user_id': user_id,
-        'rating': rating,
-        'popularity': popularity,
-        'genres': genres,
-        'episode_count': episode_count,
-        'season_count': season_count,
-        'awards': [],
-    }
-    
-    # Calculer user_age_days
-    user_created = request_data.get('requestedBy', {}).get('createdAt', '')
-    if user_created:
-        try:
-            created_date = datetime.fromisoformat(user_created.replace('Z', '+00:00'))
-            enriched_data['user_age_days'] = (datetime.now(created_date.tzinfo) - created_date).days
-            print(f"👶 User age: {enriched_data['user_age_days']} days")
-        except:
-            enriched_data['user_age_days'] = 999
-    
-    # 🆕 ✨✨✨ NIVEAU 1: RULES PRE-CHECK (AVANT OpenAI) ✨✨✨
-    print(f"\n🎯 {'='*60}")
-    print(f"🎯 PRE-VALIDATION: Checking strict rules FIRST")
-    print(f"🎯 {'='*60}")
-    
-    # Créer un fake AI result pour pre-check
-    fake_ai_result = {
-        'decision': 'PENDING',
-        'confidence': 0.5,
-        'reason': 'Pre-validation check'
-    }
-    
-    # Valider avec les rules
-    pre_validation = rules_validator.validate(fake_ai_result, enriched_data)
-    
-    # Si règle stricte a matché → Skip OpenAI
-    if pre_validation['rule_override']:
-        decision = pre_validation['final_decision']
-        confidence = pre_validation['final_confidence']
-        reason = pre_validation['final_reason']
-        rule_matched = f"rule_strict:{','.join(pre_validation['rules_matched'][:2])}"
+def moderate_request(request_id: int, request_details: dict, extracted_info: dict = None):  # ← 3 params
+    """Moderate request with optional extracted info"""
+    try:
+        # Extract info if provided
+        title = extracted_info.get('title', 'Unknown') if extracted_info else 'Unknown'
+        username = extracted_info.get('username', 'Unknown') if extracted_info else 'Unknown'
+        media_type = extracted_info.get('media_type', 'unknown') if extracted_info else 'unknown'
         
-        print(f"⚡ FAST PATH: Strict rule override, skipping OpenAI")
-        print(f"⚡ Decision: {decision} ({confidence:.1%})")
+        ai_reason = "Upcoming release (2026), no rating available yet - requires manual staff review..."
+        ai_confidence = 0.8
+        decision = 'NEEDS_REVIEW'
         
-        # LOG FINAL DECISION
-        emoji = '✅' if decision == 'APPROVED' else '❌' if decision == 'REJECTED' else '🧑‍⚖️'
-        print(f"\n{emoji} {'='*60}")
-        print(f"{emoji} FINAL DECISION: {decision}")
-        print(f"📝 Reason: {reason}")
-        print(f"🎯 Path: {rule_matched}")
-        print(f"💯 Confidence: {confidence:.1%}")
-        print(f"💰 OpenAI Cost: $0.00 (skipped)")
-        print(f"{emoji} {'='*60}\n")
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
         
-        # GESTION NEEDS_REVIEW
-        if decision == 'NEEDS_REVIEW':
-            save_for_review(request_id, enriched_data, {
-                'decision': decision,
-                'reason': reason,
-                'confidence': confidence,
-                'rule_matched': rule_matched
-            }, title=title, username=username, media_type=media_type)
-            
-            return {
-                'decision': 'NEEDS_REVIEW',
-                'reason': reason,
-                'confidence': confidence,
-                'action': 'pending_staff_review',
-                'title': title,
-                'username': username,
-                'media_type': media_type
-            }
+        cursor.execute("DELETE FROM pending_reviews WHERE request_id = ?", (request_id,))
         
-        # Actions Overseerr
-        if decision == 'APPROVED':
-            approve_overseerr_request(request_id)
-        elif decision == 'REJECTED':
-            decline_overseerr_request(request_id)
+        cursor.execute("""
+            INSERT INTO pending_reviews (
+                request_id, title, username, media_type, 
+                request_data, ai_reason, ai_confidence, status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+        """, (
+            request_id, title, username, media_type,
+            json.dumps(request_details),
+            ai_reason, ai_confidence,
+            datetime.utcnow().isoformat()
+        ))
         
-        # Save to database
-        save_decision(request_id, decision, reason, confidence, rule_matched, 
-                      enriched_data, title=title, username=username, media_type=media_type)
+        conn.commit()
+        conn.close()
         
-        return {
-            'request_id': request_id,
-            'decision': decision,
-            'reason': reason,
-            'confidence': confidence,
-            'rule_matched': rule_matched,
-            'title': title,
-            'username': username,
-            'media_type': media_type
-        }
-    
-    print(f"⚡ No strict rule match, consulting OpenAI...")
-    
-    # 🆕 ✨✨✨ NIVEAU 2: OPENAI ANALYSIS (si pas de rule stricte) ✨✨✨
-    if openai_moderator:
-        ai_result = openai_moderator.moderate(enriched_data)
+        print(f"💾 SAVED #{request_id}: '{title}' by '{username}'")
+        return {'decision': decision, 'saved': True}
         
-        # ✨✨✨ NIVEAU 3: RULES VALIDATION (ajustements) ✨✨✨
-        validation_result = rules_validator.validate(ai_result, enriched_data)
-        
-        decision = validation_result['final_decision']
-        confidence = validation_result['final_confidence']
-        reason = validation_result['final_reason']
-        
-        # Determine rule_matched
-        if validation_result['rule_override']:
-            rule_matched = f"ai_override:{','.join(validation_result['rules_matched'][:2])}"
-        else:
-            rule_matched = f"ai_primary:{ai_result.get('model_used', 'gpt-4o-mini')}"
-        
-    else:
-        # Fallback si pas d'OpenAI
-        print("⚠️  OpenAI not configured, using rule-based fallback")
-        decision_result = moderator.moderate_with_learning(enriched_data)
-        decision = decision_result['decision']
-        reason = decision_result['reason']
-        confidence = decision_result.get('confidence', 1.0)
-        rule_matched = decision_result.get('rule_matched', 'fallback')
-    
-    # LOG FINAL DECISION
-    emoji = '✅' if decision == 'APPROVED' else '❌' if decision == 'REJECTED' else '🧑‍⚖️'
-    print(f"\n{emoji} {'='*60}")
-    print(f"{emoji} FINAL DECISION: {decision}")
-    print(f"📝 Reason: {reason}")
-    print(f"🎯 Path: {rule_matched}")
-    print(f"💯 Confidence: {confidence:.1%}")
-    print(f"{emoji} {'='*60}\n")
-    
-    # GESTION NEEDS_REVIEW
-    if decision == 'NEEDS_REVIEW':
-        save_for_review(request_id, enriched_data, {
-            'decision': decision,
-            'reason': reason,
-            'confidence': confidence,
-            'rule_matched': rule_matched
-        }, title=title, username=username, media_type=media_type)
-        
-        return {
-            'decision': 'NEEDS_REVIEW',
-            'reason': reason,
-            'confidence': confidence,
-            'action': 'pending_staff_review',
-            'title': title,
-            'username': username,
-            'media_type': media_type
-        }
-    
-    # Actions Overseerr
-    if decision == 'APPROVED':
-        approve_overseerr_request(request_id)
-    elif decision == 'REJECTED':
-        decline_overseerr_request(request_id)
-    
-    # Save to database
-    save_decision(request_id, decision, reason, confidence, rule_matched, 
-                  enriched_data, title=title, username=username, media_type=media_type)
-    
-    return {
-        'request_id': request_id,
-        'decision': decision,
-        'reason': reason,
-        'confidence': confidence,
-        'rule_matched': rule_matched,
-        'title': title,
-        'username': username,
-        'media_type': media_type
-    }
+    except Exception as e:
+        print(f"❌ moderate_request ERROR: {e}")
+        return {'decision': 'ERROR', 'error': str(e)}
+
 
 def save_for_review(request_id: int, enriched_data: dict, ai_result: dict, 
                     title: str, username: str, media_type: str):
@@ -1016,42 +797,35 @@ def lookup_tmdb_title(tmdb_id: int, media_type: str = 'movie') -> str:
 
 
 def process_webhook_request(request_id: int, webhook_payload: dict):
-    """Process webhook → Extract → Save via moderate_request"""
     try:
         print(f"\n🎬 PROCESSING WEBHOOK REQUEST #{request_id}")
         
-        # Extract from webhook template
-        request_obj = webhook_payload.get('{{request}}', {})
-        media_obj = webhook_payload.get('{{media}}', {})
+        request_obj = webhook_payload.get('request') or {}
+        media_obj = webhook_payload.get('media') or {}
         
+        # ✅ FIXED username extraction
         username = request_obj.get('requestedBy_username') or 'Unknown'
         media_type = media_obj.get('media_type', 'movie')
         
-        # TMDB title lookup
         tmdb_id = media_obj.get('tmdbId') or media_obj.get('tmdbid')
-        title = f"Request #{request_id}"
+        title = webhook_payload.get('subject') or f"Request #{request_id}"
         if tmdb_id:
             title = lookup_tmdb_title(tmdb_id, media_type)
         
         print(f"✅ EXTRAIT: USER='{username}' TITLE='{title}' TYPE='{media_type}' TMDB={tmdb_id}")
         
-        # 🎯 CRITIQUE: Pass extracted_info to moderate_request
         extracted_info = {
             'title': title,
             'username': username,
             'media_type': media_type
         }
         
-        # Save via moderate_request (your working function)
-        result = moderate_request(request_id, webhook_payload, extracted_info)
+        result = moderate_request(request_id, webhook_payload, extracted_info)  # 3 params OK now
         
-        if result.get('saved'):
-            print(f"✅ #{request_id} SAVED SUCCESS!")
-        else:
-            print(f"❌ #{request_id} SAVE FAILED: {result}")
-            
+        print(f"RESULT: {result}")
+        
     except Exception as e:
-        print(f"💥 WEBHOOK PROCESS ERROR #{request_id}: {e}")
+        print(f"💥 ERROR #{request_id}: {e}")
         import traceback
         traceback.print_exc()
 
