@@ -1,10 +1,14 @@
 FROM python:3.12-slim
 
 WORKDIR /app
-COPY requirements.txt .
-RUN pip install -r requirements.txt --no-cache-dir
 
-# Copie app/ ET static/
+# Upgrade pip + install
+COPY requirements.txt .
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r requirements.txt && \
+    pip list | grep openai || (echo "❌ openai MISSING" && exit 1)
+
+# Copie code
 COPY app/ ./app/
 COPY static/ ./static/
 COPY entrypoint.sh .
