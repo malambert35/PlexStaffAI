@@ -946,31 +946,48 @@ def process_webhook_request(request_id: int, webhook_payload: dict):
 
 
 def save_pending_review(request_id: int, title: str, username: str, media_type: str, payload: dict):
-    """Save to DB with populated title/username"""
-    conn = sqlite3.connect(DB_PATH)
-    cursor = conn.cursor()
-    
-    cursor.execute("DELETE FROM pending_reviews WHERE request_id = ?", (request_id,))
-    
-    cursor.execute("""
-        INSERT INTO pending_reviews (
-            request_id, title, username, media_type, 
-            request_data, ai_reason, ai_confidence, status, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
-    """, (
-        request_id, title, username, media_type,
-        json.dumps(payload),
-        "Upcoming release (2026), no rating available yet - requires manual staff review...",
-        0.8,
-        datetime.utcnow()
-    ))
-    
-    conn.commit()
-    conn.close()
-
+    """Save to pending_reviews with populated fields"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # Delete existing
+        cursor.execute("DELETE FROM pending_reviews WHERE request_id = ?", (request_id,))
+        
+        # Insert populated record
+        cursor.execute("""
+            INSERT INTO pending_reviews (
+                request_id, title, username, media_type, 
+                request_data, ai_reason, ai_confidence, status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+        """, (
+            request_id, 
+            title, 
+            username, 
+            media_type,
+            json.dumps(payload),
+            "Upcoming release (2026), no rating available yet - requires manual staff review...", 
+            0.8,
+            datetime.utcnow().isoformat()
+        ))
+        
+        conn.commit()  # ✅ CRITICAL: Commit the transaction
+        print(f"💾 SAVED #{request_id}: '{title}' by '{username}'")
+        
+    except Exception as e:
+        print(f"❌ save_pending_review ERROR #{request_id}: {e}")
+        if 'conn' in locals():
+            conn.rollback()
+    finally:
+        if 'conn' in locals():
+            conn.close()
 
 def lookup_tmdb_title(tmdb_id: int, media_type: str = 'movie') -> str:
-    """TMDB title lookup"""
+    """TMDB title lookup with error handling"""
+    if not TMDB_API_KEY:
+        print("⚠️ No TMDB_API_KEY - using fallback title")
+        return f"Request TMDB #{tmdb_id}"
+    
     try:
         base_url = "https://api.themoviedb.org/3"
         if media_type == 'tv':
@@ -980,25 +997,21 @@ def lookup_tmdb_title(tmdb_id: int, media_type: str = 'movie') -> str:
             
         resp = httpx.get(
             url,
-            params={
-                "api_key": TMDB_API_KEY,
-                "language": "fr-FR"  # Québec French
-            },
+            params={"api_key": TMDB_API_KEY, "language": "fr-FR"},
             timeout=5
         )
         resp.raise_for_status()
         
         data = resp.json()
         title = data.get('title') or data.get('name', f"#{tmdb_id}")
-        
-        # Add year
         release_date = data.get('release_date') or data.get('first_air_date', '')
         if release_date:
             title += f" ({release_date[:4]})"
             
         return title
         
-    except:
+    except Exception as e:
+        print(f"⚠️ TMDB error {tmdb_id}: {e}")
         return f"TMDB #{tmdb_id}"
 
 
