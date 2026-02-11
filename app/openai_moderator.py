@@ -6,16 +6,26 @@ from typing import Dict
 class OpenAIModerator:
     """OpenAI-powered primary content moderation with deep reasoning"""
     
-    def __init__(self):
-        self.api_key = os.getenv("OPENAI_API_KEY")
+    def __init__(self, api_key: str = None):  # 🆕 Accepte api_key optionnel
+        """
+        Initialize OpenAI Moderator
+        
+        Args:
+            api_key: OpenAI API key (optional, falls back to env var)
+        """
+        # 🆕 Utilise api_key passé OU variable d'environnement
+        self.api_key = api_key or os.getenv("OPENAI_API_KEY")
+        
         if self.api_key:
             self.client = OpenAI(api_key=self.api_key)
+            print("✅ OpenAI client initialized")
         else:
             self.client = None
+            print("⚠️  OpenAI API key not provided")
         
-        self.model = "gpt-4o-mini"
-        self.temperature = 0.3
-        self.max_tokens = 300
+        self.model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")  # 🆕 Configurable
+        self.temperature = float(os.getenv("OPENAI_TEMPERATURE", "0.3"))  # 🆕 Configurable
+        self.max_tokens = int(os.getenv("OPENAI_MAX_TOKENS", "300"))  # 🆕 Configurable
     
     def moderate(self, request_data: Dict) -> Dict:
         """
@@ -28,7 +38,8 @@ class OpenAIModerator:
                 'reason': str,
                 'detailed_reasoning': str,
                 'risk_factors': {...},
-                'value_score': float
+                'value_score': float,
+                'model_used': str
             }
         """
         if not self.client:
@@ -36,7 +47,8 @@ class OpenAIModerator:
                 'decision': 'NEEDS_REVIEW',
                 'confidence': 0.0,
                 'reason': 'OpenAI not configured',
-                'detailed_reasoning': 'API key missing'
+                'detailed_reasoning': 'API key missing',
+                'model_used': 'none'
             }
         
         try:
@@ -137,7 +149,7 @@ Think step-by-step about quality, storage impact, user trust, and appropriatenes
 
             # ✨ Appel OpenAI avec nouvelle API
             print(f"\n🤖 {'='*60}")
-            print(f"🤖 CONSULTING OPENAI GPT-4o-mini...")
+            print(f"🤖 CONSULTING OPENAI {self.model.upper()}...")
             print(f"🤖 {'='*60}")
             
             response = self.client.chat.completions.create(
@@ -205,13 +217,17 @@ Think step-by-step about quality, storage impact, user trust, and appropriatenes
                 'decision': 'NEEDS_REVIEW',
                 'confidence': 0.0,
                 'reason': 'AI response parse error',
-                'detailed_reasoning': str(e)
+                'detailed_reasoning': str(e),
+                'model_used': self.model
             }
         except Exception as e:
             print(f"❌ OpenAI error: {e}")
+            import traceback
+            traceback.print_exc()  # 🆕 Pour debug
             return {
                 'decision': 'NEEDS_REVIEW',
                 'confidence': 0.0,
                 'reason': f'AI error: {str(e)[:50]}',
-                'detailed_reasoning': str(e)
+                'detailed_reasoning': str(e),
+                'model_used': self.model
             }
