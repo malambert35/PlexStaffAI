@@ -833,18 +833,7 @@ def save_decision(request_id: int, decision: str, reason: str, confidence: float
 
 @app.post("/webhook/overseerr")
 async def overseerr_webhook(request: Request, background_tasks: BackgroundTasks):
-    """
-    Receive webhook from Overseerr for instant moderation - FIXED VERSION
-    
-    Overseerr Configuration:
-    - URL: http://plexstaffai:5056/webhook/overseerr
-    - Authorization: Bearer YOUR_WEBHOOK_SECRET (optional)
-    - Events: Media Requested, Media Pending
-    """
     try:
-        print("🚨 WEBHOOK HIT!")  # 🔍 DEBUG
-        
-        # 🔒 Vérifier le token si configuré
         if WEBHOOK_SECRET:
             auth_header = request.headers.get("Authorization", "")
             expected = f"Bearer {WEBHOOK_SECRET}"
@@ -853,7 +842,6 @@ async def overseerr_webhook(request: Request, background_tasks: BackgroundTasks)
                 raise HTTPException(status_code=401, detail="Unauthorized")
         
         payload = await request.json()
-        print(f"🚨 PAYLOAD KEYS: {list(payload.keys())}")  # 🔍 DEBUG
         
         notification_type = payload.get('notification_type', 'unknown')
         event = payload.get('event', 'unknown')
@@ -864,97 +852,96 @@ async def overseerr_webhook(request: Request, background_tasks: BackgroundTasks)
         print(f"🔔 Type: {notification_type}")
         print(f"🔔 Event: {event}")
         print(f"🔔 Subject: {subject}")
-        print(f"🔔 Request obj: {payload.get('{{request}}', {})}")  # 🔍 DEBUG
-        print(f"🔔 Media obj: {payload.get('{{media}}', {})}")      # 🔍 DEBUG
+        print(f"🔔 Request obj: {payload.get('request')}")
+        print(f"🔔 Media obj: {payload.get('media')}")
         print(f"🔔 {'='*60}\n")
         
-        # 🎯 FIXED: Extract request_id from template payload
+        # ✅ Use real keys: 'request' and 'media'
         request_id = None
-        
-        # Try {{request}} object
-        request_data = payload.get('{{request}}', {})
-        if request_data:
-            request_id = request_data.get('request_id') or request_data.get('id')
-            print(f"🔍 Found request_id in {{request}}: {request_id}")
-        
-        # Fallback: Try media object
+
+        req_obj = payload.get('request') or {}
+        if req_obj:
+            request_id = req_obj.get('request_id') or req_obj.get('id')
+            print(f"🔍 Found request_id in request: {request_id}")
+
         if not request_id:
-            media_data = payload.get('{{media}}', {})
-            request_id = media_data.get('request_id')
-            print(f"🔍 Found request_id in {{media}}: {request_id}")
-        
-        # ULTIMATE fallback: Try root level
+            media_obj = payload.get('media') or {}
+            request_id = media_obj.get('request_id')
+            print(f"🔍 Found request_id in media: {request_id}")
+
         if not request_id:
             request_id = payload.get('request_id')
             print(f"🔍 Found request_id in root: {request_id}")
-        
+
         if not request_id:
             print("❌ NO REQUEST_ID FOUND!")
             print(f"📦 FULL PAYLOAD: {json.dumps(payload, indent=2)}")
             return {"status": "ignored", "reason": "no request_id"}
-        
+
+        request_id = int(request_id)
         print(f"🎯 REQUEST_ID EXTRACTED: {request_id}")
         
-        # Vérifier si déjà traité
         already_processed = get_processed_request_ids()
         if request_id in already_processed:
             print(f"⏭️  Request #{request_id} already processed, skipping")
             return {"status": "skipped", "request_id": request_id, "reason": "already_processed"}
         
-        # 🚀 IMMEDIATE processing (no background_tasks for debug)
-        print(f"🚀 PROCESSING #{request_id} IMMEDIATELY...")
-        process_webhook_request(request_id, payload)  # ← SYNCHRONE pour debug
+        # For now, keep it synchronous to be sure it runs
+        process_webhook_request(request_id, payload)
         
         return {
-            "status": "processed", 
+            "status": "processed",
             "request_id": request_id,
-            "title": payload.get('{{media}}', {}).get('title', 'N/A'),
-            "message": "Moderation completed ⚡"
+            "message": "Moderation triggered ⚡"
         }
-        
+
     except HTTPException:
         raise
     except json.JSONDecodeError as e:
         print(f"❌ Webhook JSON parse error: {e}")
         raise HTTPException(status_code=400, detail="Invalid JSON")
     except Exception as e:
-        print(f"❌ Webhook CRASH: {e}")
+        print(f"❌ Webhook error: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
 
 
-
 def process_webhook_request(request_id: int, webhook_payload: dict):
-    """Process webhook - KEEP WORKING USERNAME + ADD TITLE"""
+    """Process webhook → Extract → Save via moderate_request"""
     try:
         print(f"\n🎬 PROCESSING WEBHOOK REQUEST #{request_id}")
         
-        # ✅ KEEP WORKING USERNAME EXTRACTION (from your original)
-        request_obj = webhook_payload.get('{{request}}', {})
-        username = request_obj.get('requestedBy_username') or 'Unknown'
+        # ✅ Use real keys: 'request' and 'media'
+        request_obj = webhook_payload.get('request') or {}
+        media_obj = webhook_payload.get('media') or {}
         
-        # ✅ Media type
-        media_obj = webhook_payload.get('{{media}}', {})
+        username = request_obj.get('requestedBy_username') or 'Unknown'
         media_type = media_obj.get('media_type', 'movie')
         
-        # 🎥 Title: TMDB lookup using tmdbId
         tmdb_id = media_obj.get('tmdbId') or media_obj.get('tmdbid')
-        title = f"Request #{request_id}"
-        
+        title = webhook_payload.get('subject') or f"Request #{request_id}"
         if tmdb_id:
             title = lookup_tmdb_title(tmdb_id, media_type)
         
-        print(f"✅ USER: '{username}' | TITLE: '{title}' | TMDB: {tmdb_id}")
+        print(f"✅ EXTRAIT: USER='{username}' TITLE='{title}' TYPE='{media_type}' TMDB={tmdb_id}")
         
-        # 🚀 Save IMMEDIATELY with populated fields
-        save_pending_review(request_id, title, username, media_type, webhook_payload)
+        extracted_info = {
+            'title': title,
+            'username': username,
+            'media_type': media_type
+        }
         
-        # Your existing AI moderation (non-bloquant)
-        result = moderate_request(request_id, webhook_payload)
+        result = moderate_request(request_id, webhook_payload, extracted_info)
         
+        if result.get('saved'):
+            print(f"✅ #{request_id} SAVED SUCCESS!")
+        else:
+            print(f"❌ #{request_id} SAVE FAILED: {result}")
+            
     except Exception as e:
-        print(f"❌ Error #{request_id}: {e}")
+        print(f"💥 WEBHOOK PROCESS ERROR #{request_id}: {e}")
+        import traceback
         traceback.print_exc()
 
 
