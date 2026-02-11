@@ -110,81 +110,127 @@
     <script>
         // Load pending reviews
         async function loadReviews() {
-            try {
-                const response = await fetch('/staff/reviews');
-                const data = await response.json();
-                const reviews = data.reviews || [];
+    try {
+        const response = await fetch('/staff/reviews');
+        const data = await response.json();
+        const reviews = data.reviews || [];
 
-                document.getElementById('pending-count').textContent = reviews.length;
+        reviewCount = reviews.length;
+        updateBadge();
 
-                if (reviews.length === 0) {
-                    document.getElementById('reviews-list').classList.add('hidden');
-                    document.getElementById('empty-state').classList.remove('hidden');
-                    return;
-                }
+        const container = document.getElementById('reviews-container');
 
-                document.getElementById('reviews-list').classList.remove('hidden');
-                document.getElementById('empty-state').classList.add('hidden');
+        if (reviews.length === 0) {
+            container.innerHTML = `
+                <div class="text-center py-16 bg-gray-800/30 rounded-2xl">
+                    <div class="text-6xl mb-4">✅</div>
+                    <div class="text-2xl font-bold mb-2">Aucune révision en attente</div>
+                    <div class="text-gray-400">Toutes les demandes ont été traitées !</div>
+                </div>
+            `;
+            return;
+        }
 
-                const html = reviews.map(review => {
-                    // Parse request_data if it's a JSON string
-                    let requestData = review.request_data;
-                    if (typeof requestData === 'string') {
-                        try {
-                            requestData = JSON.parse(requestData);
-                        } catch (e) {
-                            requestData = {};
-                        }
-                    }
+        container.innerHTML = reviews.map(review => {
+            // Extraire les données avec fallback robuste
+            const title = review.title || review.request_data?.title || `Request #${review.request_id}`;
+            const username = review.username || review.request_data?.requested_by || 'Unknown';
+            const mediaType = review.media_type || review.request_data?.media_type || 'unknown';
+            const year = review.request_data?.year || '';
+            const rating = review.request_data?.rating || 0;
+            const popularity = review.request_data?.popularity || 0;
+            const genres = review.request_data?.genres || [];
+            const episodeCount = review.request_data?.episode_count || 0;
+            const seasonCount = review.request_data?.season_count || 0;
 
-                    const title = review.title || requestData.title || `Request #${review.request_id}`;
-                    const username = review.username || requestData.requested_by || 'Unknown';
-                    const mediaType = review.media_type || requestData.media_type || 'unknown';
-                    const year = requestData.year || '';
+            const mediaIcon = mediaType === 'tv' ? '📺' : '🎬';
+            const genresStr = genres.slice(0, 3).join(', ') || 'N/A';
+            const confidencePct = Math.round((review.ai_confidence || 0) * 100);
 
-                    return `
-                        <div class="bg-gray-700 rounded-lg p-4 mb-4 border border-gray-600 hover:border-gray-500 transition">
-                            <div class="flex justify-between items-start">
-                                <div class="flex-1">
-                                    <div class="flex items-center gap-3 mb-2">
-                                        <h3 class="text-lg font-bold text-white">${title}</h3>
-                                        <span class="px-2 py-1 bg-blue-900/50 text-blue-300 rounded text-xs">${mediaType}</span>
-                                        ${year ? `<span class="text-gray-400 text-sm">${year}</span>` : ''}
-                                    </div>
-                                    <div class="flex items-center gap-2 mb-3">
-                                        <span class="text-gray-400 text-sm">👤</span>
-                                        <span class="text-gray-300 text-sm font-medium">${username}</span>
-                                        <span class="text-gray-600">•</span>
-                                        <span class="text-gray-500 text-xs">Request #${review.request_id}</span>
-                                    </div>
-                                    <div class="bg-yellow-900/30 border border-yellow-700/50 rounded-lg p-3 mb-2">
-                                        <p class="text-sm text-yellow-300">⚠️ <strong>AI Reason:</strong> ${review.ai_reason || 'No reason provided'}</p>
-                                        <p class="text-xs text-yellow-400 mt-1">Confidence: ${Math.round((review.ai_confidence || 0) * 100)}%</p>
-                                    </div>
-                                </div>
-                                <div class="flex gap-2 ml-4">
-                                    <button onclick="approveReview(${review.id})" 
-                                        class="bg-green-600 hover:bg-green-700 px-4 py-2 rounded font-medium transition whitespace-nowrap">
-                                        ✅ <span data-i18n="reviewApprove">Approve</span>
-                                    </button>
-                                    <button onclick="rejectReview(${review.id})" 
-                                        class="bg-red-600 hover:bg-red-700 px-4 py-2 rounded font-medium transition whitespace-nowrap">
-                                        ❌ <span data-i18n="reviewReject">Reject</span>
-                                    </button>
+            return `
+                <div class="bg-gradient-to-br from-gray-800 to-gray-900 p-6 rounded-2xl border-2 border-yellow-700 hover:shadow-2xl transition-all hover:scale-[1.02]">
+                    <div class="flex justify-between items-start mb-4">
+                        <div class="flex items-center gap-4">
+                            <div class="text-5xl">${mediaIcon}</div>
+                            <div>
+                                <div class="font-black text-2xl text-white mb-1">${title}</div>
+                                <div class="flex items-center gap-3 text-sm">
+                                    <span class="bg-gray-900/50 px-3 py-1 rounded-full font-semibold">
+                                        ${mediaType === 'tv' ? '📺 TV' : '🎬 MOVIE'}
+                                    </span>
+                                    ${year ? `<span class="text-gray-400">${year}</span>` : ''}
+                                    <span class="text-yellow-400 font-bold">#${review.request_id}</span>
                                 </div>
                             </div>
                         </div>
-                    `;
-                }).join('');
+                    </div>
 
-                document.getElementById('reviews-list').innerHTML = html;
+                    <div class="grid grid-cols-2 gap-4 mb-4 text-sm">
+                        <div>
+                            <span class="text-gray-500">👤 Utilisateur:</span>
+                            <span class="text-white font-semibold ml-2">${username}</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-500">⭐ Rating:</span>
+                            <span class="text-white font-semibold ml-2">${rating}/10</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-500">🔥 Popularité:</span>
+                            <span class="text-white font-semibold ml-2">${popularity.toFixed(1)}</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-500">🎭 Genres:</span>
+                            <span class="text-white font-semibold ml-2">${genresStr}</span>
+                        </div>
+                        ${mediaType === 'tv' ? `
+                        <div>
+                            <span class="text-gray-500">📺 Saisons:</span>
+                            <span class="text-white font-semibold ml-2">${seasonCount}</span>
+                        </div>
+                        <div>
+                            <span class="text-gray-500">📼 Épisodes:</span>
+                            <span class="text-white font-semibold ml-2">${episodeCount}</span>
+                        </div>
+                        ` : ''}
+                    </div>
 
-            } catch (error) {
-                console.error('Error loading reviews:', error);
-                showToast('❌ Error loading reviews', 'error');
-            }
-        }
+                    <div class="bg-yellow-900/30 border border-yellow-700 p-4 rounded-xl mb-4">
+                        <div class="flex items-center gap-2 mb-2">
+                            <span class="text-yellow-400 font-bold">🤖 NEEDS_REVIEW</span>
+                            <span class="bg-yellow-900 px-2 py-1 rounded text-xs font-bold">${confidencePct}%</span>
+                        </div>
+                        <div class="text-sm text-yellow-200">
+                            <strong>Raison IA:</strong> ${review.ai_reason || 'No reason provided'}
+                        </div>
+                    </div>
 
+                    <div class="flex gap-3">
+                        <button onclick="approveReview(${review.id}, '${title.replace(/'/g, "\\'")}', '${username}')"
+                                class="flex-1 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 
+                                       px-6 py-3 rounded-xl font-bold text-lg transition shadow-xl transform hover:scale-105">
+                            ✅ Approuver
+                        </button>
+                        <button onclick="rejectReview(${review.id}, '${title.replace(/'/g, "\\'")}', '${username}')"
+                                class="flex-1 bg-gradient-to-r from-red-600 to-pink-600 hover:from-red-700 hover:to-pink-700 
+                                       px-6 py-3 rounded-xl font-bold text-lg transition shadow-xl transform hover:scale-105">
+                            ❌ Rejeter
+                        </button>
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+    } catch (error) {
+        console.error('Error loading reviews:', error);
+        document.getElementById('reviews-container').innerHTML = `
+            <div class="text-center py-12 bg-red-900/30 rounded-2xl border border-red-700">
+                <div class="text-6xl mb-4">❌</div>
+                <div class="text-2xl font-bold mb-2 text-red-300">Erreur de chargement</div>
+                <div class="text-red-400">${error.message}</div>
+            </div>
+        `;
+    }
+}
         async function approveReview(reviewId) {
             try {
                 showToast('⏳ Processing...', 'info');
