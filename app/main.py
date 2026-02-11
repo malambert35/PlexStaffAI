@@ -11,37 +11,78 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 import atexit
 
-# ✨ IMPORTS - Système AI-First
+# ===== CONFIGURATION GLOBALE (EN PREMIER) =====
+# 🆕 Définir TOUTES les variables AVANT les imports de modules
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+OPENAI_ENABLED = os.getenv("OPENAI_ENABLED", "true").lower() == "true"
+OVERSEERR_URL = os.getenv("OVERSEERR_API_URL", "http://overseerr:5055")  # 🆕 Renommé pour cohérence
+OVERSEERR_API_KEY = os.getenv("OVERSEERR_API_KEY", "")
+TMDB_API_KEY = os.getenv("TMDB_API_KEY", "")
+SCAN_INTERVAL_MINUTES = int(os.getenv("SCAN_INTERVAL_MINUTES", "1"))
+DB_PATH = "/config/moderation.db"
+
+# Validation des variables requises
+if not OVERSEERR_API_KEY:
+    print("⚠️  WARNING: OVERSEERR_API_KEY not set!")
+if not OVERSEERR_URL:
+    print("⚠️  WARNING: OVERSEERR_API_URL not set!")
+
+# Log de configuration
+print(f"\n{'='*60}")
+print(f"⚙️  PLEXSTAFFAI CONFIGURATION")
+print(f"{'='*60}")
+print(f"📍 Overseerr URL: {OVERSEERR_URL}")
+print(f"🔑 Overseerr API Key: {'***' + OVERSEERR_API_KEY[-4:] if OVERSEERR_API_KEY else 'NOT SET'}")
+print(f"🎬 TMDB API Key: {'SET ✅' if TMDB_API_KEY else 'NOT SET ⚠️'}")
+print(f"🤖 OpenAI Enabled: {'YES ✅' if OPENAI_ENABLED and OPENAI_API_KEY else 'NO (Rules-Only Mode)'}")
+if OPENAI_ENABLED and OPENAI_API_KEY:
+    print(f"🔑 OpenAI API Key: ***{OPENAI_API_KEY[-4:]}")
+print(f"⏰ Auto-Scan Interval: {SCAN_INTERVAL_MINUTES} minute(s)")
+print(f"💾 Database Path: {DB_PATH}")
+print(f"{'='*60}\n")
+
+# ✨ IMPORTS - Système AI-First (APRÈS la config)
 from app.config_loader import ConfigManager, SmartModerator, ModerationDecision
 from app.ml_feedback import FeedbackDatabase, EnhancedModerator
 from app.openai_moderator import OpenAIModerator
 from app.rules_validator import RulesValidator
 
+# ===== INITIALISATION FASTAPI =====
 app = FastAPI(title="PlexStaffAI", version="1.6.0")
 
-# Configuration
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
-OVERSEERR_API_URL = os.getenv("OVERSEERR_API_URL", "http://overseerr:5055")
-OVERSEERR_API_KEY = os.getenv("OVERSEERR_API_KEY")
-TMDB_API_KEY = os.getenv("TMDB_API_KEY", "")
-SCAN_INTERVAL_MINUTES = int(os.getenv("SCAN_INTERVAL_MINUTES", "1"))
-
-# ✨ AI-FIRST SYSTEM
+# ===== INITIALISATION DES MODULES =====
+# Config Manager
 config = ConfigManager("/config/config.yaml")
+
+# Feedback Database (ML Learning)
 feedback_db = FeedbackDatabase("/config/feedback.db")
+
+# Enhanced Moderator (fallback rule-based)
 moderator = EnhancedModerator(config, feedback_db)
-openai_moderator = OpenAIModerator() if OPENAI_API_KEY else None
+
+# Rules Validator (TOUJOURS actif)
 rules_validator = RulesValidator(config)
 
-# Database
-DB_PATH = "/config/moderation.db"
+# 🆕 OpenAI Moderator (FACULTATIF)
+openai_moderator = None
+if OPENAI_ENABLED and OPENAI_API_KEY:
+    try:
+        openai_moderator = OpenAIModerator(OPENAI_API_KEY)
+        print("✅ OpenAI moderation enabled (AI + Rules mode)")
+    except Exception as e:
+        print(f"⚠️  OpenAI initialization failed: {e}")
+        print("ℹ️  Falling back to rules-only mode")
+        openai_moderator = None
+else:
+    print("ℹ️  OpenAI moderation disabled (Rules-Only mode)")
 
-# ✨ SCHEDULER SETUP
+# ===== SCHEDULER SETUP =====
 scheduler = BackgroundScheduler()
-scheduler.start()
 
 # Shutdown scheduler on app exit
 atexit.register(lambda: scheduler.shutdown())
+
+print("✅ PlexStaffAI initialization complete\n")
 
 
 def init_db():
