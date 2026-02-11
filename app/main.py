@@ -913,111 +913,94 @@ async def overseerr_webhook(request: Request, background_tasks: BackgroundTasks)
 
 
 def process_webhook_request(request_id: int, webhook_payload: dict):
-    """Process a single request from webhook (background task)"""
+    """Process webhook - KEEP WORKING USERNAME + ADD TITLE"""
     try:
-        print(f"\n🎬 {'='*60}")
-        print(f"🎬 PROCESSING WEBHOOK REQUEST #{request_id}")
-        print(f"🎬 {'='*60}\n")
+        print(f"\n🎬 PROCESSING WEBHOOK REQUEST #{request_id}")
         
-        # Extract from webhook template payload
+        # ✅ KEEP WORKING USERNAME EXTRACTION (from your original)
         request_obj = webhook_payload.get('{{request}}', {})
+        username = request_obj.get('requestedBy_username') or 'Unknown'
+        
+        # ✅ Media type
         media_obj = webhook_payload.get('{{media}}', {})
-        
-        # ✅ Username (already working)
-        username = (
-            request_obj.get('requestedBy_username') or 
-            'Unknown'
-        )
-        
-        # Media type from webhook
         media_type = media_obj.get('media_type', 'movie')
         
-        # 🎥 Title: Use TMDB lookup since webhook lacks title
+        # 🎥 Title: TMDB lookup using tmdbId
         tmdb_id = media_obj.get('tmdbId') or media_obj.get('tmdbid')
         title = f"Request #{request_id}"
         
         if tmdb_id:
-            title = lookup_tmdb_title(tmdb_id, media_type)  # New helper below
+            title = lookup_tmdb_title(tmdb_id, media_type)
         
-        print(f"📋 Webhook data: tmdbId={tmdb_id}, username={username}, media_type={media_type}")
-        print(f"📺 Title lookup: {title}")
+        print(f"✅ USER: '{username}' | TITLE: '{title}' | TMDB: {tmdb_id}")
         
-        # Save to DB immediately (title + user populated)
+        # 🚀 Save IMMEDIATELY with populated fields
         save_pending_review(request_id, title, username, media_type, webhook_payload)
         
-        # Optional: API + AI moderation
-        result = moderate_request(request_id, webhook_payload, {
-            'title': title,
-            'username': username, 
-            'media_type': media_type
-        })
-        
-        print(f"\n✅ Request #{request_id}: {title} by {username}")
-        print(f"{'='*60}\n")
+        # Your existing AI moderation (non-bloquant)
+        result = moderate_request(request_id, webhook_payload)
         
     except Exception as e:
-        print(f"❌ Error processing #{request_id}: {e}")
-        import traceback
+        print(f"❌ Error #{request_id}: {e}")
         traceback.print_exc()
 
 
-def lookup_tmdb_title(tmdb_id: int, media_type: str = 'movie') -> str:
-    """Fast TMDB lookup for title"""
-    try:
-        endpoint = f"https://api.themoviedb.org/3/{media_type}/{tmdb_id}"
-        if media_type == 'tv':
-            endpoint = f"https://api.themoviedb.org/3/tv/{tmdb_id}"
-        
-        response = httpx.get(
-            endpoint,
-            params={"api_key": TMDB_API_KEY, "language": "fr-CA"},  # French-Canadian
-            timeout=5.0
-        )
-        response.raise_for_status()
-        
-        data = response.json()
-        title = data.get('title') or data.get('name', f"TMDB #{tmdb_id}")
-        
-        # Add year
-        year = data.get('release_date', '')[:4] or data.get('first_air_date', '')[:4]
-        if year:
-            title += f" ({year})"
-            
-        print(f"✅ TMDB lookup: {tmdb_id} → '{title}'")
-        return title
-        
-    except Exception as e:
-        print(f"⚠️ TMDB lookup failed for {tmdb_id}: {e}")
-        return f"TMDB #{tmdb_id}"
-
-def save_pending_review(request_id: int, title: str, username: str, media_type: str, webhook_payload: dict):
-    """Save directly to DB with populated fields"""
+def save_pending_review(request_id: int, title: str, username: str, media_type: str, payload: dict):
+    """Save to DB with populated title/username"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    # Delete existing
     cursor.execute("DELETE FROM pending_reviews WHERE request_id = ?", (request_id,))
     
-    # Insert with populated title/username
     cursor.execute("""
         INSERT INTO pending_reviews (
             request_id, title, username, media_type, 
             request_data, ai_reason, ai_confidence, status, created_at
         ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
     """, (
-        request_id,
-        title,           # ✅ Populated from TMDB
-        username,        # ✅ From webhook
-        media_type,
-        json.dumps(webhook_payload),
-        "Upcoming release (2026), no rating available yet - requires manual staff review...",  # Your AI reason
-        0.8,             # Your confidence
+        request_id, title, username, media_type,
+        json.dumps(payload),
+        "Upcoming release (2026), no rating available yet - requires manual staff review...",
+        0.8,
         datetime.utcnow()
     ))
     
     conn.commit()
     conn.close()
-    print(f"💾 Saved #{request_id}: '{title}' by {username}")
+
+
+def lookup_tmdb_title(tmdb_id: int, media_type: str = 'movie') -> str:
+    """TMDB title lookup"""
+    try:
+        base_url = "https://api.themoviedb.org/3"
+        if media_type == 'tv':
+            url = f"{base_url}/tv/{tmdb_id}"
+        else:
+            url = f"{base_url}/movie/{tmdb_id}"
+            
+        resp = httpx.get(
+            url,
+            params={
+                "api_key": TMDB_API_KEY,
+                "language": "fr-FR"  # Québec French
+            },
+            timeout=5
+        )
+        resp.raise_for_status()
+        
+        data = resp.json()
+        title = data.get('title') or data.get('name', f"#{tmdb_id}")
+        
+        # Add year
+        release_date = data.get('release_date') or data.get('first_air_date', '')
+        if release_date:
+            title += f" ({release_date[:4]})"
+            
+        return title
+        
+    except:
+        return f"TMDB #{tmdb_id}"
+
 
 def moderate_request(request_id: int, request_details: dict, extracted_info: dict = None):
     """Updated to receive title/username/media_type"""
@@ -1064,7 +1047,6 @@ def moderate_request(request_id: int, request_details: dict, extracted_info: dic
     except Exception as e:
         print(f"❌ moderate_request error: {e}")
         return {'decision': 'ERROR', 'error': str(e)}
-
 
 
 # ===== MANUAL TRIGGER ENDPOINT (pour tests) =====
