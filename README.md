@@ -47,6 +47,21 @@ PlexStaffAI est un système de modération automatique qui analyse les demandes 
 
 ---
 
+## 🖼️ Aperçu de l'interface
+
+### Dashboard principal
+
+<img width="1390" height="929" alt="image" src="https://github.com/user-attachments/assets/f03fe0f3-b1bb-42ea-ba8b-f154fef586e8" />
+
+### Historique des décisions
+
+<img width="840" height="537" alt="image" src="https://github.com/user-attachments/assets/c10197b1-87c3-4960-a20a-47c5d8d7201a" />
+
+### Requêtes en révision (NEEDS_REVIEW)
+
+<img width="847" height="294" alt="image" src="https://github.com/user-attachments/assets/e85ee34f-cb22-49db-bf28-5a596fc81123" />
+
+
 ## 🏗️ Architecture
 
 ```
