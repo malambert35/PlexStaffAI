@@ -831,11 +831,10 @@ def save_decision(request_id: int, decision: str, reason: str, confidence: float
     finally:
         conn.close()
 
-# ===== WEBHOOK ENDPOINT =====
 @app.post("/webhook/overseerr")
 async def overseerr_webhook(request: Request, background_tasks: BackgroundTasks):
     """
-    Receive webhook from Overseerr for instant moderation
+    Receive webhook from Overseerr for instant moderation - FIXED VERSION
     
     Overseerr Configuration:
     - URL: http://plexstaffai:5056/webhook/overseerr
@@ -843,6 +842,8 @@ async def overseerr_webhook(request: Request, background_tasks: BackgroundTasks)
     - Events: Media Requested, Media Pending
     """
     try:
+        print("🚨 WEBHOOK HIT!")  # 🔍 DEBUG
+        
         # 🔒 Vérifier le token si configuré
         if WEBHOOK_SECRET:
             auth_header = request.headers.get("Authorization", "")
@@ -852,6 +853,7 @@ async def overseerr_webhook(request: Request, background_tasks: BackgroundTasks)
                 raise HTTPException(status_code=401, detail="Unauthorized")
         
         payload = await request.json()
+        print(f"🚨 PAYLOAD KEYS: {list(payload.keys())}")  # 🔍 DEBUG
         
         notification_type = payload.get('notification_type', 'unknown')
         event = payload.get('event', 'unknown')
@@ -862,42 +864,52 @@ async def overseerr_webhook(request: Request, background_tasks: BackgroundTasks)
         print(f"🔔 Type: {notification_type}")
         print(f"🔔 Event: {event}")
         print(f"🔔 Subject: {subject}")
+        print(f"🔔 Request obj: {payload.get('{{request}}', {})}")  # 🔍 DEBUG
+        print(f"🔔 Media obj: {payload.get('{{media}}', {})}")      # 🔍 DEBUG
         print(f"🔔 {'='*60}\n")
         
-        # Extraire request_id
+        # 🎯 FIXED: Extract request_id from template payload
         request_id = None
-        request_data = payload.get('request', {})
         
+        # Try {{request}} object
+        request_data = payload.get('{{request}}', {})
         if request_data:
             request_id = request_data.get('request_id') or request_data.get('id')
+            print(f"🔍 Found request_id in {{request}}: {request_id}")
         
+        # Fallback: Try media object
         if not request_id:
-            media_data = payload.get('media', {})
+            media_data = payload.get('{{media}}', {})
             request_id = media_data.get('request_id')
+            print(f"🔍 Found request_id in {{media}}: {request_id}")
+        
+        # ULTIMATE fallback: Try root level
+        if not request_id:
+            request_id = payload.get('request_id')
+            print(f"🔍 Found request_id in root: {request_id}")
         
         if not request_id:
-            print("⚠️  No request_id found in webhook payload")
-            print(f"📦 Full payload: {json.dumps(payload, indent=2)}")
+            print("❌ NO REQUEST_ID FOUND!")
+            print(f"📦 FULL PAYLOAD: {json.dumps(payload, indent=2)}")
             return {"status": "ignored", "reason": "no request_id"}
+        
+        print(f"🎯 REQUEST_ID EXTRACTED: {request_id}")
         
         # Vérifier si déjà traité
         already_processed = get_processed_request_ids()
-        
         if request_id in already_processed:
             print(f"⏭️  Request #{request_id} already processed, skipping")
-            return {
-                "status": "skipped", 
-                "request_id": request_id,
-                "reason": "already_processed"
-            }
+            return {"status": "skipped", "request_id": request_id, "reason": "already_processed"}
         
-        # 🚀 Trigger modération en arrière-plan (non-bloquant)
-        background_tasks.add_task(process_webhook_request, request_id, payload)
+        # 🚀 IMMEDIATE processing (no background_tasks for debug)
+        print(f"🚀 PROCESSING #{request_id} IMMEDIATELY...")
+        process_webhook_request(request_id, payload)  # ← SYNCHRONE pour debug
         
         return {
-            "status": "accepted",
+            "status": "processed", 
             "request_id": request_id,
-            "message": "Moderation triggered ⚡"
+            "title": payload.get('{{media}}', {}).get('title', 'N/A'),
+            "message": "Moderation completed ⚡"
         }
         
     except HTTPException:
@@ -906,10 +918,11 @@ async def overseerr_webhook(request: Request, background_tasks: BackgroundTasks)
         print(f"❌ Webhook JSON parse error: {e}")
         raise HTTPException(status_code=400, detail="Invalid JSON")
     except Exception as e:
-        print(f"❌ Webhook error: {e}")
+        print(f"❌ Webhook CRASH: {e}")
         import traceback
         traceback.print_exc()
         raise HTTPException(status_code=500, detail=str(e))
+
 
 
 def process_webhook_request(request_id: int, webhook_payload: dict):
@@ -1015,52 +1028,45 @@ def lookup_tmdb_title(tmdb_id: int, media_type: str = 'movie') -> str:
         return f"TMDB #{tmdb_id}"
 
 
-def moderate_request(request_id: int, request_details: dict, extracted_info: dict = None):
-    """Updated to receive title/username/media_type"""
+def process_webhook_request(request_id: int, webhook_payload: dict):
+    """Process webhook → Extract → Save via moderate_request"""
     try:
-        # Your existing AI logic here...
-        title = extracted_info.get('title') if extracted_info else 'Unknown'
-        username = extracted_info.get('username') if extracted_info else 'Unknown'
-        media_type = extracted_info.get('media_type') if extracted_info else 'unknown'
+        print(f"\n🎬 PROCESSING WEBHOOK REQUEST #{request_id}")
         
-        # ... AI moderation ...
-        ai_reason = "Upcoming release (2026), no rating available yet - requires manual staff review..."
-        ai_confidence = 0.8
-        decision = 'NEEDS_REVIEW'  # Your logic
+        # Extract from webhook template
+        request_obj = webhook_payload.get('{{request}}', {})
+        media_obj = webhook_payload.get('{{media}}', {})
         
-        # 🎯 FIXED: Insert WITH title/username/media_type populated
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
+        username = request_obj.get('requestedBy_username') or 'Unknown'
+        media_type = media_obj.get('media_type', 'movie')
         
-        # Delete existing (in case of retry)
-        cursor.execute("DELETE FROM pending_reviews WHERE request_id = ?", (request_id,))
+        # TMDB title lookup
+        tmdb_id = media_obj.get('tmdbId') or media_obj.get('tmdbid')
+        title = f"Request #{request_id}"
+        if tmdb_id:
+            title = lookup_tmdb_title(tmdb_id, media_type)
         
-        cursor.execute("""
-            INSERT INTO pending_reviews (
-                request_id, title, username, media_type, 
-                request_data, ai_reason, ai_confidence, status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
-        """, (
-            request_id,
-            title,                    # ✅ Now populated!
-            username,                 # ✅ Now populated!
-            media_type,
-            json.dumps(request_details or {}),
-            ai_reason,
-            ai_confidence,
-            datetime.utcnow()
-        ))
+        print(f"✅ EXTRAIT: USER='{username}' TITLE='{title}' TYPE='{media_type}' TMDB={tmdb_id}")
         
-        conn.commit()
-        conn.close()
+        # 🎯 CRITIQUE: Pass extracted_info to moderate_request
+        extracted_info = {
+            'title': title,
+            'username': username,
+            'media_type': media_type
+        }
         
-        print(f"💾 Saved to DB: #{request_id} '{title}' by {username}")
-        return {'decision': decision, 'saved': True}
+        # Save via moderate_request (your working function)
+        result = moderate_request(request_id, webhook_payload, extracted_info)
         
+        if result.get('saved'):
+            print(f"✅ #{request_id} SAVED SUCCESS!")
+        else:
+            print(f"❌ #{request_id} SAVE FAILED: {result}")
+            
     except Exception as e:
-        print(f"❌ moderate_request error: {e}")
-        return {'decision': 'ERROR', 'error': str(e)}
-
+        print(f"💥 WEBHOOK PROCESS ERROR #{request_id}: {e}")
+        import traceback
+        traceback.print_exc()
 
 # ===== MANUAL TRIGGER ENDPOINT (pour tests) =====
 @app.post("/admin/moderate-now")
