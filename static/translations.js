@@ -37,6 +37,11 @@ const translations = {
         minute: "minute",
         minutes: "minutes",
         
+        // ===== ADMIN TOOLS ===== 🆕
+        adminTools: "Outils Admin",
+        adminToolsDesc: "Maintenance et nettoyage de la base de données",
+        cleanupDuplicates: "Nettoyer les Doublons",
+        
         // ===== HEALTH PAGE =====
         healthTitle: "État du Système",
         healthStatus: "Statut",
@@ -53,10 +58,10 @@ const translations = {
         
         // ===== HISTORY PAGE =====
         historyTitle: "Historique des Décisions",
-        historyRequestId: "ID",                      // 🆕 Changé
-        historyTitleCol: "Titre",                    // 🆕 Ajouté
+        historyRequestId: "ID",
+        historyTitleCol: "Titre",
         historyMedia: "Média",
-        historyUser: "Utilisateur",                  // 🆕 Ajouté
+        historyUser: "Utilisateur",
         historyDecision: "Décision",
         historyReason: "Raison",
         historyConfidence: "Confiance",
@@ -168,6 +173,11 @@ const translations = {
         minute: "minute",
         minutes: "minutes",
         
+        // ===== ADMIN TOOLS ===== 🆕
+        adminTools: "Admin Tools",
+        adminToolsDesc: "Database maintenance and cleanup",
+        cleanupDuplicates: "Cleanup Duplicates",
+        
         // ===== HEALTH PAGE =====
         healthTitle: "System Health",
         healthStatus: "Status",
@@ -184,10 +194,10 @@ const translations = {
         
         // ===== HISTORY PAGE =====
         historyTitle: "Decision History",
-        historyRequestId: "ID",                      // 🆕 Changé
-        historyTitleCol: "Title",                    // 🆕 Ajouté
+        historyRequestId: "ID",
+        historyTitleCol: "Title",
         historyMedia: "Media",
-        historyUser: "User",                         // 🆕 Ajouté
+        historyUser: "User",
         historyDecision: "Decision",
         historyReason: "Reason",
         historyConfidence: "Confidence",
