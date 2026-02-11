@@ -1083,7 +1083,8 @@ async def stats():
         "needs_review": stats.get('NEEDS_REVIEW', 0),
         "approval_rate": round(approved / total * 100, 1) if total > 0 else 0,
         "last_24h": last_24h,
-        "scan_interval": SCAN_INTERVAL_MINUTES
+        "scan_interval": SCAN_INTERVAL_MINUTES,
+        "openai_enabled": openai_moderator is not None  # 🆕 Statut OpenAI
     }
 
 
