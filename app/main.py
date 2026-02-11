@@ -642,34 +642,44 @@ def moderate_request(request_id: int, request_data: dict) -> dict:
     }
 
 def save_for_review(request_id: int, enriched_data: dict, ai_result: dict, 
-                    title: str, username: str, media_type: str):  # 🆕 params
+                    title: str, username: str, media_type: str):
     """Sauvegarde une requête pour révision manuelle"""
     
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
     
-    cursor.execute("""
-        INSERT OR REPLACE INTO pending_reviews 
-        (request_id, title, username, media_type, request_data, 
-         ai_decision, ai_reason, ai_confidence, status, created_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
-    """, (
-        request_id,
-        title,                              # 🆕
-        username,                           # 🆕
-        media_type,                         # 🆕
-        json.dumps(enriched_data),
-        ai_result.get('decision'),
-        ai_result.get('reason'),
-        ai_result.get('confidence'),
-        datetime.now().isoformat()
-    ))
+    # Extraire les données avec fallback
+    final_title = title or enriched_data.get('title', f'Request {request_id}')
+    final_username = username or enriched_data.get('requested_by', 'Unknown')
+    final_media_type = media_type or enriched_data.get('media_type', 'unknown')
     
-    conn.commit()
-    conn.close()
-    
-    print(f"💾 Saved to pending_reviews: {title} by {username}")
-
+    try:
+        cursor.execute("""
+            INSERT OR REPLACE INTO pending_reviews 
+            (request_id, title, username, media_type, request_data, 
+             ai_decision, ai_reason, ai_confidence, status, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+        """, (
+            request_id,
+            final_title,
+            final_username,
+            final_media_type,
+            json.dumps(enriched_data),
+            ai_result.get('decision', 'NEEDS_REVIEW'),
+            ai_result.get('reason', ''),
+            ai_result.get('confidence', 0.8),
+            datetime.now().isoformat()
+        ))
+        
+        conn.commit()
+        print(f"💾 Saved to pending_reviews: {final_title} by {final_username}")
+        
+    except Exception as e:
+        print(f"❌ Error saving to pending_reviews: {e}")
+        import traceback
+        traceback.print_exc()
+    finally:
+        conn.close()
 
 
 def save_decision(request_id: int, decision: str, reason: str, 
