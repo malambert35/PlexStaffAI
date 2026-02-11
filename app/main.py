@@ -1260,170 +1260,182 @@ async def staff_report_html():
 
 @app.get("/history", response_class=HTMLResponse)
 async def history_html():
-    """History page with language support"""
+    """History page with decisions (no cache, fixed layout)"""
     conn = sqlite3.connect(DB_PATH)
     cursor = conn.cursor()
+    
+    # Récupère les dernières décisions
     cursor.execute("""
-        SELECT 
-            id, 
-            request_id, 
-            title,           -- 🆕
-            username,        -- 🆕
-            media_type,      -- 🆕
-            decision, 
-            reason, 
-            confidence, 
-            timestamp 
-        FROM decisions 
-        ORDER BY timestamp DESC 
+        SELECT request_id, title, username, media_type, decision, reason, 
+               confidence, timestamp
+        FROM decisions
+        ORDER BY timestamp DESC
         LIMIT 50
     """)
+    
     decisions = cursor.fetchall()
     conn.close()
     
+    # Build rows HTML
     rows_html = ""
     for row in decisions:
-        # 🆕 Extraction des nouvelles colonnes
-        request_id = row[1]
-        title = row[2] or f"Request #{request_id}"
-        username = row[3] or "Unknown"
-        media_type = row[4] or "unknown"
-        decision = row[5]
-        reason = row[6]
-        confidence = row[7]
-        timestamp = row[8]
+        request_id, title, username, media_type, decision, reason, confidence, timestamp = row
         
-        decision_badge = {
-            'APPROVED': '<span class="px-3 py-1 bg-emerald-500 text-white rounded-full text-sm">✅ Approved</span>',
-            'REJECTED': '<span class="px-3 py-1 bg-red-500 text-white rounded-full text-sm">❌ Rejected</span>',
-            'NEEDS_REVIEW': '<span class="px-3 py-1 bg-yellow-500 text-black rounded-full text-sm">⚠️ Review</span>'
-        }.get(decision, decision)
+        # Decision badge styling
+        if decision == 'APPROVED':
+            badge_class = 'bg-emerald-900/50 text-emerald-300 border border-emerald-700'
+            icon = '✅'
+        elif decision == 'REJECTED':
+            badge_class = 'bg-red-900/50 text-red-300 border border-red-700'
+            icon = '❌'
+        else:
+            badge_class = 'bg-yellow-900/50 text-yellow-300 border border-yellow-700'
+            icon = '🧑‍⚖️'
         
-        # 🆕 Badge pour le type de média
-        media_badge = f'<span class="px-2 py-1 bg-blue-900/50 text-blue-300 rounded text-xs">{media_type}</span>'
+        # Format timestamp
+        try:
+            if 'T' in timestamp:
+                dt = datetime.fromisoformat(timestamp.replace('Z', '+00:00'))
+            else:
+                dt = datetime.strptime(timestamp, '%Y-%m-%d %H:%M:%S')
+            formatted_time = dt.strftime('%Y-%m-%d %H:%M')
+        except:
+            formatted_time = timestamp[:16] if timestamp else 'N/A'
+        
+        # Confidence percentage
+        try:
+            conf_pct = f"{float(confidence) * 100:.0f}%" if confidence else "N/A"
+        except:
+            conf_pct = str(confidence) if confidence else "N/A"
+        
+        # Truncate long reasons
+        display_reason = reason[:80] + '...' if len(reason) > 80 else reason
         
         rows_html += f"""
-        <tr class="border-b border-gray-700 hover:bg-gray-700/30 transition">
-            <td class="px-4 py-3">
-                <div class="font-bold text-white">#{request_id}</div>
+        <tr class="border-b border-gray-800 hover:bg-gray-800/50 transition">
+            <td class="px-6 py-4 font-mono text-blue-400">#{request_id}</td>
+            <td class="px-6 py-4 font-semibold">{title}</td>
+            <td class="px-6 py-4">
+                <span class="px-2 py-1 bg-gray-700 rounded text-xs">
+                    {media_type}
+                </span>
             </td>
-            <td class="px-4 py-3">
-                <div class="font-semibold text-white mb-1">{title}</div>
-                {media_badge}
+            <td class="px-6 py-4 text-gray-400">👤{username}</td>
+            <td class="px-6 py-4">
+                <span class="inline-flex items-center gap-1 px-3 py-1 rounded-full text-sm font-bold whitespace-nowrap {badge_class}">
+                    {icon} {decision}
+                </span>
             </td>
-            <td class="px-4 py-3">
-                <div class="flex items-center gap-2">
-                    <span class="text-gray-400">👤</span>
-                    <span class="text-gray-300">{username}</span>
-                </div>
+            <td class="px-6 py-4 text-sm text-gray-400 max-w-md">
+                {display_reason}
             </td>
-            <td class="px-4 py-3">{decision_badge}</td>
-            <td class="px-4 py-3 text-sm text-gray-400">{reason[:80]}...</td>
-            <td class="px-4 py-3 text-center">{int(confidence*100)}%</td>
-            <td class="px-4 py-3 text-sm text-gray-500">{timestamp}</td>
+            <td class="px-6 py-4 text-center">
+                <span class="px-2 py-1 bg-purple-900/50 text-purple-300 rounded text-sm font-semibold">
+                    {conf_pct}
+                </span>
+            </td>
+            <td class="px-6 py-4 text-sm text-gray-500 whitespace-nowrap">{formatted_time}</td>
         </tr>
         """
     
-    html_content = f"""
-<!DOCTYPE html>
+    html = f"""<!DOCTYPE html>
 <html lang="fr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title data-i18n="historyTitle">Historique des Décisions</title>
+    <title>PlexStaffAI - Historique</title>
+    <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+    <meta http-equiv="Pragma" content="no-cache">
+    <meta http-equiv="Expires" content="0">
     <link rel="icon" type="image/svg+xml" href="/static/favicon.svg">
     <script src="https://cdn.tailwindcss.com"></script>
+    <script src="/static/translations.js"></script>
     <style>
-        .lang-selector {{
-            position: fixed;
-            top: 20px;
-            right: 20px;
-            z-index: 100;
-            display: flex;
-            gap: 8px;
-            background: rgba(31, 41, 55, 0.95);
-            backdrop-filter: blur(10px);
-            padding: 8px;
-            border-radius: 12px;
-            border: 1px solid rgba(75, 85, 99, 0.5);
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.3);
+        @keyframes fadeIn {{
+            from {{ opacity: 0; transform: translateY(10px); }}
+            to {{ opacity: 1; transform: translateY(0); }}
         }}
-        .lang-btn {{
-            padding: 8px 16px;
-            border-radius: 8px;
-            font-weight: 600;
-            font-size: 14px;
-            cursor: pointer;
-            transition: all 0.2s;
-            border: 1px solid transparent;
-            background: transparent;
-            color: #9CA3AF;
-        }}
-        .lang-btn:hover {{
-            background: rgba(75, 85, 99, 0.5);
-            color: #E5E7EB;
-        }}
-        .lang-btn.active {{
-            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-            color: white;
-            border-color: rgba(102, 126, 234, 0.5);
-            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
-        }}
-        .lang-btn .flag {{
-            font-size: 18px;
-            margin-right: 6px;
+        tbody tr {{
+            animation: fadeIn 0.3s ease-out;
         }}
     </style>
 </head>
-<body class="bg-gray-900 text-white font-sans antialiased">
-    
-    <div class="lang-selector">
-        <button class="lang-btn active" data-lang="fr" onclick="setLanguage('fr')">
-            <span class="flag">🇫🇷</span> FR
-        </button>
-        <button class="lang-btn" data-lang="en" onclick="setLanguage('en')">
-            <span class="flag">🇬🇧</span> EN
-        </button>
-    </div>
-
-    <div class="max-w-7xl mx-auto px-4 py-12">
-        <div class="mb-8">
-            <a href="/" class="text-blue-400 hover:text-blue-300 transition">
+<body class="bg-gray-900 text-white min-h-screen">
+    <div class="max-w-7xl mx-auto px-4 py-8">
+        <div class="flex justify-between items-center mb-8">
+            <h1 class="text-4xl font-black bg-gradient-to-r from-blue-400 to-purple-500 bg-clip-text text-transparent">
+                📜 <span data-i18n="historyTitle">Historique des Décisions</span>
+            </h1>
+            <a href="/" 
+               class="bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 
+                      px-6 py-3 rounded-xl font-bold transition shadow-xl">
                 <span data-i18n="backToDashboard">← Retour au Dashboard</span>
             </a>
         </div>
         
-        <div class="bg-gradient-to-br from-gray-800 to-gray-900 p-8 rounded-3xl border border-gray-700 shadow-2xl">
-            <h1 class="text-4xl font-black mb-8 bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
-                📜 <span data-i18n="historyTitle">Historique des Décisions</span>
-            </h1>
-            
+        <div class="bg-gray-800 rounded-2xl border border-gray-700 overflow-hidden shadow-2xl">
             <div class="overflow-x-auto">
                 <table class="w-full">
-                    <thead class="bg-gray-700/50">
+                    <thead class="bg-gray-900/50 border-b border-gray-700">
                         <tr>
-                            <th class="px-4 py-3 text-left" data-i18n="historyRequestId">ID</th>
-                            <th class="px-4 py-3 text-left" data-i18n="historyTitle">Titre</th>
-                            <th class="px-4 py-3 text-left" data-i18n="historyUser">Utilisateur</th>
-                            <th class="px-4 py-3 text-left" data-i18n="historyDecision">Décision</th>
-                            <th class="px-4 py-3 text-left" data-i18n="historyReason">Raison</th>
-                            <th class="px-4 py-3 text-center" data-i18n="historyConfidence">Confiance</th>
-                            <th class="px-4 py-3 text-left" data-i18n="historyDate">Date</th>
+                            <th class="px-6 py-4 text-left text-sm font-semibold text-gray-400">
+                                <span data-i18n="historyRequestId">ID</span>
+                            </th>
+                            <th class="px-6 py-4 text-left text-sm font-semibold text-gray-400">
+                                <span data-i18n="historyTitleCol">Titre</span>
+                            </th>
+                            <th class="px-6 py-4 text-left text-sm font-semibold text-gray-400">
+                                <span data-i18n="historyMedia">Type</span>
+                            </th>
+                            <th class="px-6 py-4 text-left text-sm font-semibold text-gray-400">
+                                <span data-i18n="historyUser">Utilisateur</span>
+                            </th>
+                            <th class="px-6 py-4 text-left text-sm font-semibold text-gray-400">
+                                <span data-i18n="historyDecision">Décision</span>
+                            </th>
+                            <th class="px-6 py-4 text-left text-sm font-semibold text-gray-400">
+                                <span data-i18n="historyReason">Raison</span>
+                            </th>
+                            <th class="px-6 py-4 text-center text-sm font-semibold text-gray-400">
+                                <span data-i18n="historyConfidence">Confiance</span>
+                            </th>
+                            <th class="px-6 py-4 text-left text-sm font-semibold text-gray-400">
+                                <span data-i18n="historyDate">Date</span>
+                            </th>
                         </tr>
                     </thead>
                     <tbody>
-                        {rows_html if rows_html else '<tr><td colspan="7" class="text-center py-8 text-gray-400" data-i18n="historyNoDecisions">Aucune décision enregistrée</td></tr>'}
+                        {rows_html if rows_html else '<tr><td colspan="8" class="px-6 py-12 text-center text-gray-500"><span data-i18n="historyNoDecisions">Aucune décision enregistrée</span></td></tr>'}
                     </tbody>
                 </table>
             </div>
         </div>
+        
+        <div class="mt-6 text-center text-gray-500 text-sm">
+            <p>
+                Affichage des 50 dernières décisions • 
+                <button onclick="location.reload()" class="text-blue-400 hover:text-blue-300 cursor-pointer">
+                    🔄 Actualiser
+                </button>
+            </p>
+        </div>
     </div>
     
-    <script src="/static/translations.js"></script>
+    <script>
+        // Auto-refresh toutes les 30 secondes
+        setTimeout(() => location.reload(), 30000);
+        
+        // Update translations on load
+        document.addEventListener('DOMContentLoaded', function() {{
+            updatePageLanguage();
+        }});
+        
+        console.log('✅ History page loaded (auto-refresh in 30s)');
+    </script>
 </body>
-</html>
-    """
-    return HTMLResponse(content=html_content)
+</html>"""
+    
+    return HTMLResponse(content=html)
 
 
 @app.get("/api/history")
