@@ -2194,6 +2194,68 @@ async def reject_review(review_id: int, request: Request = None):
             status_code=500
         )
 
+@app.get("/admin/cleanup-duplicates")
+async def cleanup_duplicates():
+    """Remove duplicate decisions (keep only the first one for each request_id)"""
+    try:
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # Trouver les request_id avec doublons
+        cursor.execute("""
+            SELECT request_id, COUNT(*) as count
+            FROM decisions
+            GROUP BY request_id
+            HAVING count > 1
+            ORDER BY count DESC
+        """)
+        
+        duplicates = cursor.fetchall()
+        
+        if not duplicates:
+            conn.close()
+            return {
+                "duplicates_found": 0,
+                "entries_removed": 0,
+                "message": "No duplicates found ✅"
+            }
+        
+        total_removed = 0
+        
+        for request_id, count in duplicates:
+            # Garder seulement le premier (plus ancien timestamp)
+            cursor.execute("""
+                DELETE FROM decisions
+                WHERE id NOT IN (
+                    SELECT MIN(id)
+                    FROM decisions
+                    WHERE request_id = ?
+                ) AND request_id = ?
+            """, (request_id, request_id))
+            
+            removed = cursor.rowcount
+            total_removed += removed
+            
+            print(f"🗑️  Request #{request_id}: Removed {removed} duplicate(s) (kept 1/{count})")
+        
+        conn.commit()
+        conn.close()
+        
+        return {
+            "duplicates_found": len(duplicates),
+            "entries_removed": total_removed,
+            "message": f"Cleaned up {total_removed} duplicate entries from {len(duplicates)} requests ✅"
+        }
+        
+    except Exception as e:
+        print(f"❌ Cleanup error: {e}")
+        import traceback
+        traceback.print_exc()
+        return {
+            "error": str(e),
+            "message": "Cleanup failed ❌"
+        }
+
 @app.get("/staff/pending-count")
 async def pending_count():
     """Count pending reviews"""
