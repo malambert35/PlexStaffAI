@@ -1,8 +1,9 @@
 FROM python:3.12-slim
 WORKDIR /app
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install -r requirements.txt
 COPY . .
+COPY entrypoint.sh .
+RUN chmod +x entrypoint.sh
 EXPOSE 5056
-VOLUME /app/data
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "5056"]
+ENTRYPOINT ["./entrypoint.sh"]
