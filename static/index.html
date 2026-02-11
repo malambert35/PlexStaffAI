@@ -113,7 +113,7 @@
                 <div class="inline-flex items-center gap-2 bg-emerald-900/30 px-6 py-2 rounded-full border border-emerald-700">
                     <span class="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></span>
                     <span class="text-emerald-300 font-semibold">
-                        ⏰ <span data-i18n="autoScanActive">Webhook trigger Actif • Toutes les</span>
+                        ⏰ <span data-i18n="autoScanActive">Webhook trigger Actif</span>
                     </span>
                 </div>
 
@@ -228,7 +228,7 @@
             <div class="text-gray-400 text-lg space-y-3">
                 <p>👆 <span data-i18n="resultsDesc">Clique</span> <span class="text-blue-400 font-bold" data-i18n="moderateNow">"MODÉRER MAINTENANT"</span> <span data-i18n="resultsDesc2">pour scanner immédiatement</span></p>
                 <p class="text-sm text-gray-500">
-                    ⏰ <span data-i18n="autoScanInfo">Le système traite automatiquement toutes les requetes.</span>
+                    ⏰ <span data-i18n="autoScanInfo">Le système traite automatiquement toutes les requetes entrantes via webhook.</span>
                 </p>
             </div>
         </div>
@@ -333,16 +333,6 @@
                 statusText.className = 'font-semibold text-purple-300';
             }
         }
-
-        // Update scan interval display
-        function updateScanInterval(scanInterval) {
-            const lang = localStorage.getItem('language') || 'fr';
-            const minuteText = scanInterval === 1 ? t('minute') : t('minutes');
-            const intervalText = `${scanInterval} ${minuteText}`;
-
-            document.getElementById('scan-interval-header').textContent = intervalText;
-            document.getElementById('scan-interval-badge').textContent = intervalText;
-            document.getElementById('scan-interval-info').textContent = intervalText;
         }
 
         // Format stats as HTML cards
@@ -354,10 +344,6 @@
 
                     if (content.startsWith('{')) {
                         const stats = JSON.parse(content);
-
-                        if (stats.scan_interval) {
-                            updateScanInterval(stats.scan_interval);
-                        }
 
                         if (stats.hasOwnProperty('openai_enabled')) {
                             updateOpenAIStatus(stats.openai_enabled);
