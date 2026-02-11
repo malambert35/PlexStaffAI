@@ -89,7 +89,7 @@ PlexStaffAI est un système de modération automatique qui analyse les demandes 
 
 ### **1. Clone le dépôt**
 ```bash
-git clone https://github.com/ton-user/PlexStaffAI.git
+git clone https://github.com/malambert35/PlexStaffAI.git
 cd PlexStaffAI
 ```
 
@@ -104,7 +104,7 @@ version: '3.8'
 services:
   plexstaffai:
     container_name: PlexStaffAI
-    image: ghcr.io/ton-user/plexstaffai:latest
+    image: ghcr.io/malambert35/plexstaffai:latest
     # build: .  # Si tu veux build localement
     ports:
       - "5056:5056"
@@ -552,8 +552,8 @@ curl -X POST http://localhost:5056/webhook/overseerr   -H "Content-Type: applica
 
 ## 📞 Support
 
-- **Issues** : https://github.com/ton-user/PlexStaffAI/issues
-- **Discussions** : https://github.com/ton-user/PlexStaffAI/discussions
+- **Issues** : https://github.com/malambert35/PlexStaffAI/issues
+- **Discussions** : https://github.com/malambert35/PlexStaffAI/discussions
 - **Discord** : [lien-serveur-discord]
 
 ---
@@ -578,7 +578,7 @@ curl -X POST http://localhost:5056/webhook/overseerr   -H "Content-Type: applica
 
 Si ce projet t'aide, laisse une étoile ! ⭐
 
-[![Star History Chart](https://api.star-history.com/svg?repos=ton-user/PlexStaffAI&type=Date)](https://star-history.com/#ton-user/PlexStaffAI&Date)
+[![Star History Chart](https://api.star-history.com/svg?repos=malambert35/PlexStaffAI&type=Date)](https://star-history.com/#malambert35/PlexStaffAI&Date)
 
 ---
 
