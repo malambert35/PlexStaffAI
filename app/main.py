@@ -2032,23 +2032,23 @@ async def review_dashboard_html():
 async def get_pending_reviews():
     """Get pending review requests"""
     conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row  # 🆕 Pour accéder par nom de colonne
+    conn.row_factory = sqlite3.Row  # Pour accéder par nom de colonne
     cursor = conn.cursor()
     
     cursor.execute("""
         SELECT 
-            id,                -- 🆕 ID de la review (clé primaire)
-            request_id, 
-            title,             -- 🆕
-            username,          -- 🆕
-            media_type,        -- 🆕
-            request_data, 
-            ai_reason, 
-            ai_confidence, 
+            id,
+            request_id,
+            title,
+            username,
+            media_type,
+            request_data,
+            ai_reason,
+            ai_confidence,
             created_at
-        FROM pending_reviews
+        FROM pending_reviews 
         WHERE status = 'pending'
-        ORDER BY created_at DESC
+        ORDER BY created_at DESC 
         LIMIT 50
     """)
     
@@ -2057,18 +2057,17 @@ async def get_pending_reviews():
     
     reviews = []
     for row in rows:
-        # Parse request_data
         try:
             request_data = json.loads(row['request_data']) if row['request_data'] else {}
         except:
             request_data = {}
         
         reviews.append({
-            'id': row['id'],                                    # 🆕 ID pour approve/reject
+            'id': row['id'],              # ID pour approve/reject
             'request_id': row['request_id'],
-            'title': row['title'] or 'Unknown',                # 🆕
-            'username': row['username'] or 'Unknown',          # 🆕
-            'media_type': row['media_type'] or 'unknown',      # 🆕
+            'title': row['title'] or 'Unknown',
+            'username': row['username'] or 'Unknown',
+            'media_type': row['media_type'] or 'unknown',
             'request_data': request_data,
             'ai_reason': row['ai_reason'],
             'ai_confidence': row['ai_confidence'],
