@@ -92,7 +92,7 @@
                     <p class="text-xl lg:text-2xl text-gray-400 font-light">
                         <span data-i18n="subtitle">IA Moderation Overseerr • Webhook trigger</span>
                     </p>
-                    <p class="text-sm text-gray-500 mt-2">v1.6.0 • <span data-i18n="version">Smart Rules + ML Learning</span></p>
+                    <p class="text-sm text-gray-500 mt-2">v1.7.0 • <span data-i18n="version">Webhook • Rules-First + OpenAI</span></p>
                 </div>
 
                 <!-- Review Dashboard Button -->
@@ -109,11 +109,11 @@
             </div>
 
             <div class="flex flex-col md:flex-row justify-center items-center gap-4">
-                <!-- Auto-Scan Badge -->
+                <!-- Webhook Badge -->
                 <div class="inline-flex items-center gap-2 bg-emerald-900/30 px-6 py-2 rounded-full border border-emerald-700">
                     <span class="w-2 h-2 bg-emerald-400 rounded-full animate-pulse"></span>
                     <span class="text-emerald-300 font-semibold">
-                        ⏰ <span data-i18n="autoScanActive">Webhook trigger Actif</span>
+                        ⚡ <span data-i18n="webhookActive">Webhook Active</span>
                     </span>
                 </div>
 
@@ -213,7 +213,7 @@
 
         <!-- Loading Indicator -->
         <div class="text-center mb-8">
-            <span id="loading" class="htmx-indicator text-blue-400 text-lg font-semibold" data-i18n="loading">
+            <span id="loading" class="htmx-indicator text-blue-400 text-lg font-semibold hidden" data-i18n="loading">
                 ⏳ Modération en cours...
             </span>
         </div>
@@ -228,7 +228,7 @@
             <div class="text-gray-400 text-lg space-y-3">
                 <p>👆 <span data-i18n="resultsDesc">Clique</span> <span class="text-blue-400 font-bold" data-i18n="moderateNow">"MODÉRER MAINTENANT"</span> <span data-i18n="resultsDesc2">pour scanner immédiatement</span></p>
                 <p class="text-sm text-gray-500">
-                    ⏰ <span data-i18n="autoScanInfo">Le système traite automatiquement toutes les requetes entrantes via webhook.</span>
+                    ⚡ <span data-i18n="webhookInfo">Le système traite automatiquement TOUTES les requêtes entrantes via webhook en temps réel.</span>
                 </p>
             </div>
         </div>
@@ -270,7 +270,7 @@
                 <span data-i18n="poweredBy">Powered by</span> 
                 <a href="https://github.com/malambert35/PlexStaffAI" 
                    class="text-blue-400 hover:text-blue-300 font-semibold transition">
-                    PlexStaffAI v1.6.0
+                    PlexStaffAI v1.7.0
                 </a>
             </p>
             <div class="flex justify-center gap-4 text-sm mt-2">
@@ -289,7 +289,7 @@
                 </a>
             </div>
             <p class="text-xs text-gray-600 mt-4">
-                OpenAI GPT-4o-mini • FastAPI • HTMX • Webhook Triggered • Smart Rules + ML Learning
+                OpenAI GPT-4o-mini • FastAPI • HTMX • Webhook Triggered • Rules-First + OpenAI
             </p>
         </footer>
     </div>
@@ -320,19 +320,19 @@
         function updateOpenAIStatus(enabled) {
             const badge = document.getElementById('openai-status-badge');
             const statusText = document.getElementById('openai-status-text');
+            const pulse = badge.querySelector('.w-2');
 
             if (enabled) {
                 badge.className = 'inline-flex items-center gap-2 px-6 py-2 rounded-full border bg-blue-900/30 border-blue-700';
-                badge.querySelector('.w-2').className = 'w-2 h-2 bg-blue-400 rounded-full animate-pulse';
-                statusText.textContent = 'OpenAI Active (AI + Rules)';
+                pulse.className = 'w-2 h-2 bg-blue-400 rounded-full animate-pulse';
+                statusText.textContent = 'OpenAI Active (Rules + AI)';
                 statusText.className = 'font-semibold text-blue-300';
             } else {
-                badge.className = 'inline-flex items-center gap-2 px-6 py-2 rounded-full border bg-purple-900/30 border-purple-700';
-                badge.querySelector('.w-2').className = 'w-2 h-2 bg-purple-400 rounded-full animate-pulse';
+                badge.className = 'inline-flex items-center gap-2 px-6 py-2 rounded-full border bg-gray-900/30 border-gray-700';
+                pulse.className = 'w-2 h-2 bg-gray-400 rounded-full animate-pulse';
                 statusText.textContent = 'Rules-Only Mode';
-                statusText.className = 'font-semibold text-purple-300';
+                statusText.className = 'font-semibold text-gray-300';
             }
-        }
         }
 
         // Format stats as HTML cards
@@ -344,41 +344,45 @@
 
                     if (content.startsWith('{')) {
                         const stats = JSON.parse(content);
-
-                        if (stats.hasOwnProperty('openai_enabled')) {
+                        
+                        // Update OpenAI status
+                        if (stats.openai_enabled !== undefined) {
                             updateOpenAIStatus(stats.openai_enabled);
                         }
 
+                        // Format as beautiful cards
                         container.innerHTML = `
                             <div class="grid grid-cols-1 md:grid-cols-4 gap-6">
                                 <div class="bg-gradient-to-br from-gray-800 to-gray-900 p-8 rounded-2xl shadow-2xl border border-gray-700">
-                                    <h3 class="text-lg font-semibold text-gray-400 mb-4">📊 <span data-i18n="totalDecisions">${t('totalDecisions')}</span></h3>
+                                    <h3 class="text-lg font-semibold text-gray-400 mb-4">📊 Total Décisions</h3>
                                     <div class="text-5xl font-black text-white">${stats.total_decisions || 0}</div>
-                                    <div class="text-sm text-gray-500 mt-2" data-i18n="totalDecisionsDesc">${t('totalDecisionsDesc')}</div>
+                                    <div class="text-sm text-gray-500 mt-2">Toutes les décisions prises</div>
                                 </div>
                                 <div class="bg-gradient-to-br from-emerald-900 to-teal-900 p-8 rounded-2xl shadow-2xl">
-                                    <h3 class="text-lg font-semibold text-gray-300 mb-4">✅ <span data-i18n="approved">${t('approved')}</span></h3>
+                                    <h3 class="text-lg font-semibold text-gray-300 mb-4">✅ Approuvés</h3>
                                     <div class="text-5xl font-black text-emerald-300">${stats.approved || 0}</div>
-                                    <div class="text-sm text-emerald-600 mt-2" data-i18n="approvedDesc">${t('approvedDesc')}</div>
+                                    <div class="text-sm text-emerald-600 mt-2">Auto-approuvés</div>
                                 </div>
                                 <div class="bg-gradient-to-br from-red-900 to-pink-900 p-8 rounded-2xl shadow-2xl">
-                                    <h3 class="text-lg font-semibold text-gray-300 mb-4">❌ <span data-i18n="rejected">${t('rejected')}</span></h3>
+                                    <h3 class="text-lg font-semibold text-gray-300 mb-4">❌ Rejetés</h3>
                                     <div class="text-5xl font-black text-red-300">${stats.rejected || 0}</div>
-                                    <div class="text-sm text-red-600 mt-2" data-i18n="rejectedDesc">${t('rejectedDesc')}</div>
+                                    <div class="text-sm text-red-600 mt-2">Auto-rejetés</div>
                                 </div>
                                 <div class="bg-gradient-to-br from-indigo-900 to-purple-900 p-8 rounded-2xl shadow-2xl">
-                                    <h3 class="text-lg font-semibold text-gray-300 mb-4">📈 <span data-i18n="approvalRate">${t('approvalRate')}</span></h3>
+                                    <h3 class="text-lg font-semibold text-gray-300 mb-4">📈 Taux d'approbation</h3>
                                     <div class="text-4xl font-black text-purple-300">${stats.approval_rate || 0}%</div>
-                                    <div class="text-sm text-purple-600 mt-2" data-i18n="approvalRateDesc">${t('approvalRateDesc')}</div>
+                                    <div class="text-sm text-purple-600 mt-2">Sur toutes les décisions</div>
                                 </div>
                             </div>
                         `;
 
                         // Update translations after stats refresh
-                        updatePageLanguage();
+                        if (typeof updatePageLanguage === 'function') {
+                            updatePageLanguage();
+                        }
                     }
                 } catch(e) {
-                    console.log('Stats already in HTML format');
+                    console.error('Stats parsing error:', e);
                 }
             }
         });
@@ -387,13 +391,11 @@
         async function cleanupDuplicates() {
             const resultDiv = document.getElementById('cleanup-result');
 
-            // Confirmation
-            if (!confirm('⚠️ Remove duplicate decisions from database?\n\nThis will keep only the first occurrence of each request and delete all duplicates.')) {
+            if (!confirm('⚠️ Remove duplicate decisions from database?\\n\\nThis will keep only the first occurrence of each request and delete all duplicates.')) {
                 return;
             }
 
             try {
-                // Loading state
                 resultDiv.innerHTML = `
                     <div class="bg-blue-900/30 border border-blue-700 p-4 rounded-xl animate-pulse">
                         <div class="flex items-center gap-3">
@@ -403,11 +405,9 @@
                     </div>
                 `;
 
-                // Call cleanup endpoint
                 const response = await fetch('/admin/cleanup-duplicates');
                 const result = await response.json();
 
-                // Success state
                 if (result.duplicates_found === 0) {
                     resultDiv.innerHTML = `
                         <div class="bg-emerald-900/30 border border-emerald-700 p-4 rounded-xl">
@@ -435,20 +435,17 @@
                             </div>
                         </div>
                     `;
-
-                    // Refresh stats after cleanup
-                    setTimeout(() => {
-                        document.querySelector('[hx-get="/stats"]').click();
-                    }, 1000);
                 }
 
-                // Auto-hide after 5 seconds
+                setTimeout(() => {
+                    document.querySelector('[hx-get="/stats"]').click();
+                }, 1000);
+
                 setTimeout(() => {
                     resultDiv.innerHTML = '';
                 }, 5000);
 
             } catch (error) {
-                // Error state
                 resultDiv.innerHTML = `
                     <div class="bg-red-900/30 border border-red-700 p-4 rounded-xl">
                         <div class="flex items-center gap-3">
@@ -482,22 +479,20 @@
                         badge.classList.add('animate-pulse');
                     }
                 })
-                .catch(err => console.log('Pending count endpoint not available yet'));
+                .catch(err => console.log('Pending count endpoint not available'));
         }
 
         // Initial updates
         updatePendingCount();
-
-        // Periodic updates
         setInterval(updatePendingCount, 30000);
 
         // HTMX logging
         document.body.addEventListener('htmx:afterRequest', function(evt) {
-            console.log('HTMX:', evt.detail.pathInfo.requestPath, evt.detail.successful ? '✅' : '❌');
+            console.log('HTMX:', evt.detail.xhr.responseURL, evt.detail.successful ? '✅' : '❌');
         });
 
-        console.log('✅ PlexStaffAI v1.6.0 Dashboard loaded');
-        console.log('🌍 Language system active');
+        console.log('✅ PlexStaffAI v1.7.0 Dashboard loaded');
+        console.log('⚡ Webhook mode active');
         console.log('HTMX Version:', htmx.version || '❌ Not loaded');
     </script>
 </body>
