@@ -202,7 +202,7 @@ def get_overseerr_requests():
     """Fetch pending requests from Overseerr"""
     try:
         response = httpx.get(
-            f"{OVERSEERR_API_URL}/api/v1/request",
+            f"{OVERSEERR_URL}/api/v1/request",
             headers={"X-Api-Key": OVERSEERR_API_KEY},
             params={"take": 50, "skip": 0, "filter": "pending"},
             timeout=10.0
