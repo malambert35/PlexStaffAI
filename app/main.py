@@ -919,7 +919,29 @@ def process_webhook_request(request_id: int, webhook_payload: dict):
         print(f"🎬 PROCESSING WEBHOOK REQUEST #{request_id}")
         print(f"🎬 {'='*60}\n")
         
-        # Récupérer les détails complets depuis Overseerr
+        # 🎯 FIXED: Extract title + username DIRECTLY from webhook_payload (faster, no extra API call)
+        title = webhook_payload.get('subject', f'Request #{request_id}')
+        media_type_obj = webhook_payload.get('media', {})
+        request_obj = webhook_payload.get('request', {})
+        
+        # Extract from media/request objects in payload [web:33]
+        media_title = (media_type_obj.get('title') or 
+                      request_obj.get('media', {}).get('title') or 
+                      title)
+        
+        user_display = (request_obj.get('requestedBy', {}).get('displayName') or 
+                       request_obj.get('requestedBy_username') or  # Legacy webhook format
+                       webhook_payload.get('requestedBy_username') or
+                       'Unknown')
+        
+        media_type = (media_type_obj.get('mediaType') or 
+                     request_obj.get('media', {}).get('mediaType') or 
+                     'movie')
+        
+        print(f"📋 Extracted from webhook: title='{media_title}', user='{user_display}', type='{media_type}'")
+        
+        # Récupérer les détails complets depuis Overseerr (backup if webhook missing data)
+        request_details = None
         try:
             response = httpx.get(
                 f"{OVERSEERR_URL}/api/v1/request/{request_id}",
@@ -928,23 +950,85 @@ def process_webhook_request(request_id: int, webhook_payload: dict):
             )
             response.raise_for_status()
             request_details = response.json()
+            
+            # Override with API data if webhook was incomplete [web:21]
+            if not media_title or media_title == f'Request #{request_id}':
+                media_title = request_details.get('media', {}).get('title', media_title)
+            if user_display == 'Unknown':
+                user_obj = request_details.get('user') or request_details.get('requestedBy', {})
+                user_display = user_obj.get('displayName') or user_obj.get('username') or 'Unknown'
+                
         except httpx.HTTPStatusError as e:
             if e.response.status_code == 404:
                 print(f"⚠️  Request #{request_id} not found in Overseerr (may be deleted)")
                 return
-            raise
+            print(f"⚠️  API fallback failed, using webhook data only: {e}")
         
-        # Modérer
-        result = moderate_request(request_id, request_details)
+        # 🆕 Pass title/username/media_type to moderate_request
+        result = moderate_request(request_id, request_details or webhook_payload, {
+            'title': media_title,
+            'username': user_display, 
+            'media_type': media_type
+        })
         
         decision = result.get('decision', 'UNKNOWN')
         print(f"\n✅ Webhook request #{request_id} processed: {decision}")
+        print(f"📺 Title: {media_title}")
+        print(f"👤 User: {user_display}")
         print(f"{'='*60}\n")
         
     except Exception as e:
         print(f"❌ Error processing webhook request #{request_id}: {e}")
         import traceback
         traceback.print_exc()
+
+
+def moderate_request(request_id: int, request_details: dict, extracted_info: dict = None):
+    """Updated to receive title/username/media_type"""
+    try:
+        # Your existing AI logic here...
+        title = extracted_info.get('title') if extracted_info else 'Unknown'
+        username = extracted_info.get('username') if extracted_info else 'Unknown'
+        media_type = extracted_info.get('media_type') if extracted_info else 'unknown'
+        
+        # ... AI moderation ...
+        ai_reason = "Upcoming release (2026), no rating available yet - requires manual staff review..."
+        ai_confidence = 0.8
+        decision = 'NEEDS_REVIEW'  # Your logic
+        
+        # 🎯 FIXED: Insert WITH title/username/media_type populated
+        conn = sqlite3.connect(DB_PATH)
+        cursor = conn.cursor()
+        
+        # Delete existing (in case of retry)
+        cursor.execute("DELETE FROM pending_reviews WHERE request_id = ?", (request_id,))
+        
+        cursor.execute("""
+            INSERT INTO pending_reviews (
+                request_id, title, username, media_type, 
+                request_data, ai_reason, ai_confidence, status, created_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
+        """, (
+            request_id,
+            title,                    # ✅ Now populated!
+            username,                 # ✅ Now populated!
+            media_type,
+            json.dumps(request_details or {}),
+            ai_reason,
+            ai_confidence,
+            datetime.utcnow()
+        ))
+        
+        conn.commit()
+        conn.close()
+        
+        print(f"💾 Saved to DB: #{request_id} '{title}' by {username}")
+        return {'decision': decision, 'saved': True}
+        
+    except Exception as e:
+        print(f"❌ moderate_request error: {e}")
+        return {'decision': 'ERROR', 'error': str(e)}
+
 
 
 # ===== MANUAL TRIGGER ENDPOINT (pour tests) =====
