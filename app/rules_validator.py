@@ -1,4 +1,5 @@
 from typing import Dict, List
+from datetime import datetime
 from app.config_loader import ConfigManager, ModerationDecision
 
 class RulesValidator:
@@ -34,6 +35,7 @@ class RulesValidator:
         episodes = request_data.get('episode_count', 0)
         seasons = request_data.get('season_count', 0)
         user_age_days = request_data.get('user_age_days', 0)
+        year = request_data.get('year', '')  # NOUVEAU: Année de sortie
         
         # Résultats
         final_decision = ai_decision
@@ -48,6 +50,8 @@ class RulesValidator:
         print(f"🎯 RULES VALIDATION LAYER")
         print(f"🎯 {'='*60}")
         print(f"🤖 AI Initial: {ai_decision} ({ai_confidence:.1%})")
+        if year:
+            print(f"📅 Year extracted: {year}")
         
         # ✅ STRICT AUTO-APPROVE RULES (Override AI if necessary)
         auto_approve = self.config.get('auto_approve', {})
@@ -130,6 +134,29 @@ class RulesValidator:
                 })
                 final_confidence = min(1.0, final_confidence + 0.1)
                 print(f"✅ Rule genres: Supports AI decision (+10% confidence)")
+        
+        # 🆕 NOUVELLE RÈGLE: UPCOMING RELEASE WITH NO RATING (avant needs_review)
+        today_year = datetime.now().year
+        if year and year.isdigit():
+            release_year = int(year)
+            if release_year > today_year and rating == 0:
+                rules_matched.append('needs_review.upcoming_norating')
+                if ai_decision != 'NEEDS_REVIEW':
+                    rule_override = True
+                    final_decision = 'NEEDS_REVIEW'
+                    final_confidence = 0.95
+                    override_reason = f"Upcoming release ({year}), no rating available yet - requires manual staff review"
+                    print(f"⚠️  OVERRIDE: Upcoming {year} > {today_year}, rating=0")
+            elif release_year <= today_year and rating == 0:
+                # Skip review pour releases passées, même sans rating
+                rules_matched.append('past_release_skip')
+                confidence_adjustments.append({
+                    'rule': 'past_release_skip',
+                    'adjustment': +0.2,
+                    'reason': f'Past release {year} <= {today_year}, skip upcoming rule'
+                })
+                final_confidence = min(1.0, final_confidence + 0.2)
+                print(f"✅ Rule past_release_skip: Past content ({year}), boost confidence (+20%)")
         
         # ⚠️ NEEDS_REVIEW TRIGGERS
         needs_review = self.config.get('needs_review', {})
