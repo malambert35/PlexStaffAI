@@ -6,3 +6,6 @@ scikit-learn==1.4.0
 numpy==1.26.3
 openai==1.10.0
 APScheduler==3.10.4
+requests==2.31.0
+pydantic==2.5.0
+python-multipart==0.0.6

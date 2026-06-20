@@ -142,7 +142,11 @@ class RulesValidator:
                 pass
 
         # ✅ STRICT AUTO-APPROVE RULES
-        auto_approve = self.config.get('auto_approve', {})
+        # config.yaml stores these rules under ``ai_rules``. Keep the root
+        # lookup as a compatibility fallback for older user configurations.
+        auto_approve = self.config.get(
+            'ai_rules.auto_approve', self.config.get('auto_approve', {})
+        )
 
         # Rule: Excellent rating (STRICT)
         if rating >= auto_approve.get('rating_above', 999):
@@ -194,7 +198,9 @@ class RulesValidator:
                 }
 
         # ❌ STRICT AUTO-REJECT RULES
-        auto_reject = self.config.get('auto_reject', {})
+        auto_reject = self.config.get(
+            'ai_rules.auto_reject', self.config.get('auto_reject', {})
+        )
 
         # Rule: Very low rating (STRICT)
         if rating > 0 and rating <= auto_reject.get('rating_below', 0):
@@ -313,7 +319,9 @@ class RulesValidator:
             print(f"✅ Rule genres: Supports AI decision (+10% confidence)")
 
         # ⚠️ NEEDS_REVIEW TRIGGERS (non-stricts)
-        needs_review = self.config.get('needs_review', {})
+        needs_review = self.config.get(
+            'ai_rules.needs_review', self.config.get('needs_review', {})
+        )
 
         # Rule: Very long series
         if episodes > needs_review.get('episode_count_above', 999):

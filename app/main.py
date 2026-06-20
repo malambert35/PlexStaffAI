@@ -382,44 +382,134 @@ def get_title_from_media(media: dict, tmdb_enriched: dict = None) -> str:
     return f"TMDB-{media.get('tmdbId', 'unknown')}"
 
 
-def moderate_request(request_id: int, request_details: dict, extracted_info: dict = None):  # ← 3 params
-    """Moderate request with optional extracted info"""
+def run_moderation(request_id: int, request_details: dict, extracted_info: dict = None):
+    """Run the complete rules-first moderation workflow for one request.
+
+    Overseerr's polling API and webhook payloads use different field names;
+    normalize both forms here so every entry point follows the same path.
+    """
     try:
-        # Extract info if provided
-        title = extracted_info.get('title', 'Unknown') if extracted_info else 'Unknown'
-        username = extracted_info.get('username', 'Unknown') if extracted_info else 'Unknown'
-        media_type = extracted_info.get('media_type', 'unknown') if extracted_info else 'unknown'
-        
-        ai_reason = "Upcoming release (2026), no rating available yet - requires manual staff review..."
-        ai_confidence = 0.8
-        decision = 'NEEDS_REVIEW'
-        
-        conn = sqlite3.connect(DB_PATH)
-        cursor = conn.cursor()
-        
-        cursor.execute("DELETE FROM pending_reviews WHERE request_id = ?", (request_id,))
-        
-        cursor.execute("""
-            INSERT INTO pending_reviews (
-                request_id, title, username, media_type, 
-                request_data, ai_reason, ai_confidence, status, created_at
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)
-        """, (
-            request_id, title, username, media_type,
-            json.dumps(request_details),
-            ai_reason, ai_confidence,
-            datetime.utcnow().isoformat()
-        ))
-        
-        conn.commit()
-        conn.close()
-        
-        print(f"💾 SAVED #{request_id}: '{title}' by '{username}'")
-        return {'decision': decision, 'saved': True}
-        
+        request_obj = request_details.get('request') or request_details
+        media = request_details.get('media') or request_obj.get('media') or {}
+        requested_by = request_obj.get('requestedBy') or request_details.get('requestedBy') or {}
+        if not isinstance(requested_by, dict):
+            requested_by = {}
+
+        media_type = (
+            (extracted_info or {}).get('media_type')
+            or media.get('mediaType')
+            or media.get('media_type')
+            or request_details.get('mediaType')
+            or 'movie'
+        ).lower()
+        media_type = 'tv' if media_type in {'tv', 'show'} else 'movie'
+
+        tmdb_id = media.get('tmdbId') or media.get('tmdb_id') or request_details.get('tmdbId')
+        try:
+            tmdb_id = int(tmdb_id) if tmdb_id else None
+        except (TypeError, ValueError):
+            tmdb_id = None
+        tmdb_data = enrich_from_tmdb(tmdb_id, media_type) if tmdb_id else {}
+
+        title = (
+            (extracted_info or {}).get('title')
+            or media.get('title')
+            or media.get('name')
+            or tmdb_data.get('title')
+            or tmdb_data.get('original_title')
+            or request_details.get('subject')
+            or f'Request #{request_id}'
+        )
+        username = (
+            (extracted_info or {}).get('username')
+            or request_obj.get('requestedBy_username')
+            or requested_by.get('displayName')
+            or requested_by.get('username')
+            or 'Unknown'
+        )
+
+        moderation_data = {
+            **tmdb_data,
+            'title': title,
+            'media_type': media_type,
+            'requested_by': username,
+            'user_id': requested_by.get('id') or request_obj.get('requestedById'),
+            # Missing account age must not accidentally classify a user as new.
+            'user_age_days': request_details.get('user_age_days', 999),
+            'genres': tmdb_data.get('genres') or media.get('genres') or [],
+            'rating': tmdb_data.get('rating', media.get('voteAverage', 0)),
+            'popularity': tmdb_data.get('popularity', media.get('popularity', 0)),
+            'year': tmdb_data.get('year') or str(media.get('releaseDate') or '')[:4],
+            'episode_count': tmdb_data.get('episode_count', 0),
+            'season_count': tmdb_data.get('season_count', 0),
+        }
+
+        # Clear allow/deny cases bypass OpenAI to save cost and latency.
+        precheck = rules_validator.validate(
+            {'decision': 'PENDING', 'confidence': 0.5, 'reason': 'Rules pre-check'},
+            moderation_data,
+        )
+        if precheck['final_decision'] != 'PENDING':
+            result = {
+                'decision': precheck['final_decision'],
+                'confidence': precheck['final_confidence'],
+                'reason': precheck['final_reason'],
+                'rule_matched': ', '.join(precheck['rules_matched']) or 'strict_rule',
+                'source': 'strict_rules',
+            }
+        elif openai_moderator:
+            ai_result = openai_moderator.moderate(moderation_data)
+            validated = rules_validator.validate(ai_result, moderation_data)
+            result = {
+                'decision': validated['final_decision'],
+                'confidence': validated['final_confidence'],
+                'reason': validated['final_reason'],
+                'rule_matched': ', '.join(validated['rules_matched']) or 'openai',
+                'source': 'openai',
+            }
+        else:
+            result = moderator.moderate_with_learning(moderation_data)
+
+        decision = result['decision']
+        reason = result['reason']
+        confidence = result['confidence']
+        rule_matched = result.get('rule_matched') or result.get('source', 'rules_only')
+
+        if decision == 'APPROVED':
+            action_succeeded = approve_overseerr_request(request_id)
+        elif decision == 'REJECTED':
+            action_succeeded = decline_overseerr_request(request_id)
+        else:
+            save_for_review(request_id, moderation_data, result, title, username, media_type)
+            action_succeeded = True
+
+        # A failed call to Overseerr must remain actionable instead of being
+        # recorded as a completed approval/rejection.
+        if not action_succeeded:
+            decision = 'NEEDS_REVIEW'
+            reason = f'Could not apply {result["decision"]} in Overseerr; manual review required.'
+            confidence = 0.0
+            rule_matched = 'overseerr_action_failed'
+            save_for_review(request_id, moderation_data, {
+                'decision': decision, 'reason': reason, 'confidence': confidence
+            }, title, username, media_type)
+
+        save_decision(
+            request_id, decision, reason, confidence, rule_matched,
+            moderation_data, title, username, media_type,
+        )
+        print(f"Decision #{request_id}: {decision} ({rule_matched})")
+        return {
+            **result,
+            'decision': decision,
+            'reason': reason,
+            'confidence': confidence,
+            'title': title,
+            'saved': True,
+        }
     except Exception as e:
-        print(f"❌ moderate_request ERROR: {e}")
-        return {'decision': 'ERROR', 'error': str(e)}
+        print(f"run_moderation ERROR: {e}")
+        return {'decision': 'ERROR', 'error': str(e), 'saved': False}
 
 
 def save_for_review(request_id: int, enriched_data: dict, ai_result: dict, 
@@ -713,7 +803,7 @@ def process_webhook_request(request_id: int, webhook_payload: dict):
             'media_type': media_type
         }
         
-        result = moderate_request(request_id, webhook_payload, extracted_info)
+        result = run_moderation(request_id, webhook_payload, extracted_info)
         
         if result.get('saved'):
             print(f"✅ #{request_id} SAVED SUCCESS!")
@@ -820,7 +910,7 @@ def process_webhook_request(request_id: int, webhook_payload: dict):
             'media_type': media_type
         }
         
-        result = moderate_request(request_id, webhook_payload, extracted_info)  # 3 params OK now
+        result = run_moderation(request_id, webhook_payload, extracted_info)
         
         print(f"RESULT: {result}")
         
@@ -881,7 +971,7 @@ async def manual_moderate():
     needs_review_count = 0
     
     for req in requests:
-        result = moderate_request(req['id'], req)
+        result = run_moderation(req['id'], req)
         results.append(result)
         
         decision = result.get('decision', '')
@@ -2479,9 +2569,8 @@ async def startup_event():
 
 @app.on_event("shutdown")
 async def shutdown_event():
-    """Stop scheduler on app shutdown"""
-    scheduler.shutdown()
-    print("\n🛑 Scheduler stopped")
+    """Log graceful shutdown; scheduling is handled by cron."""
+    print("\nPlexStaffAI stopped")
 
 
 if __name__ == "__main__":
